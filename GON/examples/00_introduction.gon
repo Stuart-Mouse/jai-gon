@@ -1,0 +1,65 @@
+
+# Welcome, this file will serve as an introduction to the basic syntax and structure of a GON file.
+
+# Firstly, as you may have already surmised, comments can be inserted in a file with "#".
+# Everything after a "#" until the end of the line is ignored.
+
+# This is a field:
+
+name value
+
+# It has the name "name" and the value "value".
+# Every field in a gon file consists of a name and value pair (unless the object is in an array, in which case it has no name). 
+# Each token (a name or value) is separated by whitespace, unless encased in quotation marks, in which case the content of the quotation marks is treated as a single token.
+
+# There are three types of GON field:
+#   field  - contains a single value
+#   object - contains multiple named fields enclosed in curly braces
+#   array  - contains multiple anonymous values enclosed in square brackets
+
+# Below are some examples of fields, objects, and arrays.
+
+# A field named "my_favorite_color" with the value "green"
+my_favorite_color green
+
+# The value here is enclosed in quotation marks so that the spaces in it
+#   will be treated as part of the string, rather than as whitespace between tokens.
+name "value with spaces in it"
+
+# The same can be done for the names of fields
+"name with spaces in it" value
+
+# Every name or value token in GON is a string, even if it looks like a number or a boolean value.
+# Of course, the parser can convert these values into integers, floats, or booleans where applicable.
+my_lucky_number 35
+
+# Here is an example of an object with a few fields in it
+# It is important to note that an object does not itself have a value, it only acts as a container for other fields.
+sample_object {
+  message "This is a field nested inside an object."
+  number 69420
+  nested_object {
+    message "This is a field nested inside an object which is itself nested inside an object."
+    # Objects may be nested to any depth.
+  }
+}
+
+# And lastly, we have arrays.
+# As mentioned, arrays contain multiple values, but these values do not have unique names associated with them.
+# It is not necessary to place commas between elements in an array. In fact, commas are just considered whitespace.
+simple_array [ 1, 2.2, three, "four and a half", 5 ]
+
+# Again, despite what appearances may indicate these values are all just string values in the context of the GON file itself. 
+# Arrays, like objects, can be nested within one another. We can also mix and match any gon field types within an array.
+mixed_array [
+  [ 1, 2, 3 ]
+  "string value"
+  {
+    number 5      # Because the immediate parent of this field is an object, it is named.
+  }
+]
+
+
+# By combining fields, objects, and arrays, I think you will find that you can very compactly express most of the data that one would want to read in from a text file.
+
+Because fields within a GON file are addressed by their names, one should generally ensure that fields' names are unique within the scope they are in.
