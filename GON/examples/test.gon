@@ -1,0 +1,6 @@
+# This file will probably have more stuff in it later as I add futher example programs.
+
+# But for now, here's the numbers we'll be loading into our linked list in 03_complex_types.
+# Try playing around with the values here. 
+# Maybe you could reorder them and then add logic in the event handler to add numbers to the list in numeric order?
+numbers [ 1.1, 2.2, 3.3, 4.4, 5.5 ]

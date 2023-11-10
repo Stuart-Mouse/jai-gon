@@ -1,5 +1,6 @@
-
-#load "../module.jai";
+#import "Basic";
+#import "String";
+GON :: #import "GON";
 
 /*
   The most basic feature of this parser is the data binding.
@@ -58,11 +59,11 @@ HairColor :: enum {
   Alternatively, if our struct is bound to a GON array, then we can just give the values of each of the fields in order. 
   We will do this below when we provide the values for dates of birth in our sample GON file. 
 */
-DateOfBirth :: struct {
+DateOfBirth :: struct @gon_serialize_as_array { 
   month : Month;
   day   : int;
   year  : int;
-}
+} 
 
 /* 
   Not all enums are the same however!
@@ -84,7 +85,7 @@ Disability :: enum_flags {
   In theory, you may bind this to any basic single-value type which can be represented by a string.
 */
 Person :: struct {
-  name          : string;  @gon_name
+  name          : string;      @gon_name
   age           : int;
   date_of_birth : DateOfBirth;
   hair_color    : HairColor;
@@ -97,8 +98,8 @@ Person :: struct {
     but thanks to the runtime type info of Jai, we can do this easily.
 */
 Town :: struct {
-  name   : string;  @gon_name
-  people : [..] Person;
+  name   : string;      @gon_name
+  people : [..] Person; @gon_serialize_as_object
 }
 
 /*
@@ -134,7 +135,7 @@ town {
       age 92
       hair_color BROWN
       disability [ BLIND, DEAF ]        # We can provide multiple enum_flags values using the GON array syntax.
-      date_of_birth [ AUGUST 15 1956 ]
+      date_of_birth [ AUGUST 15 1931 ]
     }
   }
 }
@@ -161,7 +162,7 @@ main :: () {
     Below, we are initializing the data bindings using array and struct literals, but one could determine what information 
       they want to bind dynamically. 
   */
-  parse_context : GonParseContext = .{
+  parse_context : GON.ParseContext = .{
     file = GON_STRING,
     data_bindings = .[
       .{ 
@@ -184,12 +185,16 @@ main :: () {
     ],
   };
 
-  success := parse_file(*parse_context);
+  success := GON.parse_file(*parse_context);
 
   if !success return;
 
-  print("lines in file: %\n", parse_context.line_count);
+  /*
+    Here we'll just print the values of these variables using Jai's default printing 
+      in order to show that the data was loaded properly.
+  */
   print("message: %\n", message);
   print("numbers: %\n", numbers);
   print("town: %\n", town);
 }
+

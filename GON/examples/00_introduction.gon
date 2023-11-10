@@ -61,5 +61,4 @@ mixed_array [
 
 
 # By combining fields, objects, and arrays, I think you will find that you can very compactly express most of the data that one would want to read in from a text file.
-
-Because fields within a GON file are addressed by their names, one should generally ensure that fields' names are unique within the scope they are in.
+# Because fields within a GON file are addressed by their names, one should generally ensure that fields' names are unique within the scope they are in.

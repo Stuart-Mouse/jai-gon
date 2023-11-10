@@ -8,155 +8,201 @@
 
 
 /*
-  For all basic types, this basically just kicks the can down the road to regular old print to do the real legwork.
-  But for serializing structs to GON, we need some custom formatting, and this gets the job done well enough.
+  TODO Note:
+
+  In order to make serialization and parsing of structs more correct, 
+  it may be desirable to implement some compile time check that ensures 
+  that any struct member with the @gon_name note is a string.
+  Otherwise, I would have to be able to use the stringified versions of other data types as names 
+  and that seems to be simply too complex and messy of a thing to deal with.
+
+  I'm not sure exactly how to go about adding those checks to the build process from a library file, 
+  so I'll have to look into that at a later date.
+
 */
-print_gon :: (name: string, value: Any, indent: int = 0) {
+
+
+
+
+/*
+  Recursively serializes an object to a string in GON format.
+  Currently supports:
+    - standard serialization of int, float, enum, struct, and array types
+    - serializing named GON objects from structs with a specified @gon_name member
+    - serializing structs as GON arrays when noted @gon_serialize_as_array (this note can be on either a struct type definition or on a struct member)
+    - serializing arrays as GON objects when noted @gon_serialize_as_object
+
+  In the future, I plan to allow extending serialization with better custom formatting options and potentially a more general event system like what the parser uses.
+  How exactly to do this though. May be a bit tricky, but it would enable cool things like storing named references to other objects, which can be resolved into pointers or handles when we read the data back in from file.
+
+  TODO? rename GonType.INVALID to .NONE
+*/
+serialize_any :: (sb: *String_Builder, name: string, value: Any, indent: int = 0, print_name: bool = true, override_gon_type: GonType = .INVALID) {
+  // This will print a string in a GON conformant way.
+  // If the string does not contain any whitespace characters or reserved GON structural characters, then it can be printed without quotation marks.
+  print_gon_string :: (sb: *String_Builder, name: string) #expand {
+    if (contains_any_character(name, whitespace_and_reserved_chars)) {
+      print_to_builder(sb, "\"%\" ", name);
+    } else print_to_builder(sb, "% ", name);
+  }
+
   if value.type.type == {
     case .STRUCT;
       struct_info := cast(*Type_Info_Struct) value.type;
 
-      struct_name_member := get_struct_member_with_note(struct_info, "gon_name");
-      if struct_name_member print("% ", struct_name_member);
-
-      print("{\n");
-      for * m: struct_info.members {
-        if m == struct_name_member continue; // Skip printing the gon_name member.
-        m_value : Any;
-        m_value.type = m.type;
-        m_value.value_pointer = s.value_pointer + m.offset_in_bytes;
-        print_gon(m.name, m_value, child_indent);
+      serialize_as_array := (override_gon_type == .ARRAY);
+      for struct_info.notes {
+        if it == "gon_serialize_as_array" then serialize_as_array = true;
       }
-      for 0..indent-1 print(" ");
-      print("}\n");
+
+      for 0..indent-1 print_to_builder(sb, " ");
+
+      struct_name_member := get_struct_member_with_note(struct_info, "gon_name");
+      if print_name {
+        if struct_name_member {
+          m_value : Any;
+          m_value.type = struct_name_member.type;
+          m_value.value_pointer = value.value_pointer + struct_name_member.offset_in_bytes;
+          print_to_builder(sb, "\"%\" ", m_value);
+        }
+        else print_gon_string(sb, name);
+      }
+
+      if serialize_as_array {
+        print_to_builder(sb, "[ ");
+        for * m: struct_info.members {
+          m_value : Any;
+          m_value.type = m.type;
+          m_value.value_pointer = value.value_pointer + m.offset_in_bytes;
+          
+          serialize_any(sb, m.name, m_value, indent + 2, print_name = false);
+        }
+        print_to_builder(sb, "]\n");
+      }
+      else {
+        print_to_builder(sb, "{\n");
+        for * m: struct_info.members {
+          if m == struct_name_member && print_name continue; // Skip printing the gon_name member if it was already printed as the gon object name
+          m_value : Any;
+          m_value.type = m.type;
+          m_value.value_pointer = value.value_pointer + m.offset_in_bytes;
+
+          m_override_gon_type := GonType.INVALID;
+          if (inline struct_member_has_note(m, "gon_serialize_as_object"))
+            m_override_gon_type = .OBJECT;
+          if (inline struct_member_has_note(m, "gon_serialize_as_array" ))
+            m_override_gon_type = .ARRAY;
+          serialize_any(sb, m.name, m_value, indent + 2, override_gon_type = m_override_gon_type);
+        }
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_to_builder(sb, "}\n");
+      }
 
     case .ARRAY;
+      array_info := cast(*Type_Info_Array)value.type;
 
-    case .ENUM;
-      if <<cast(*u64)value.value_pointer != 0 {
-        enum_info := cast(*Type_Info_Enum) value.type;
-        if enum_info.enum_type_flags & .FLAGS {
-          print("% " name);
-          for enum_info.values {
-            if <<cast(*u64)value.value_pointer & xx enum_info.values[it_index]
-              print(enum_info.names[it_index]);
-          }
-        }
-        else print("% %\n", name, value);
+      serialize_as_object := (override_gon_type == .OBJECT);
+      // for array_info.notes {
+      //   if it == "gon_serialize_as_object" then serialize_as_object = true;
+      // }
+
+      count : s64;
+      data  : *void;
+      if array_info.array_type == .FIXED {
+        count = array_info.array_count;
+        data  = value.value_pointer;
+      } else {
+        array := cast(*Resizable_Array)value.value_pointer;
+        count = array.count;
+        data  = array.data;
       }
 
-    case .INTEGER;  #through
+      if print_name {
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_gon_string(sb, name);
+      }
+
+      if serialize_as_object {
+        print_to_builder(sb, "{\n");
+        for 0..count-1 {
+          item : Any = ---;
+          item.type = array_info.element_type;
+          item.value_pointer = data + array_info.element_type.runtime_size * it;
+          serialize_any(sb, "", item, indent + 2);
+        }
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_to_builder(sb, "}\n");
+      }
+      else {
+        print_to_builder(sb, "[\n");
+        for 0..count-1 {
+          item : Any = ---;
+          item.type = array_info.element_type;
+          item.value_pointer = data + array_info.element_type.runtime_size * it;
+          serialize_any(sb, "", item, indent + 2, print_name = false);
+        }
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_to_builder(sb, "]\n");
+      }
+
+
+
+    case .ENUM;
+      enum_info := cast(*Type_Info_Enum) value.type;
+
+      if print_name {
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_gon_string(sb, name);
+      }
+
+      if enum_info.enum_type_flags & .FLAGS {
+        print_to_builder(sb, "[ ");
+        for enum_info.values {
+          if (<<cast(*u64)value.value_pointer) & xx enum_info.values[it_index]
+            print_to_builder(sb, "% ", enum_info.names[it_index]);
+        }
+        print_to_builder(sb, "]");
+      }
+      else print_to_builder(sb, "%", value);
+
+      if print_name print_to_builder(sb, "\n");
+      else          print_to_builder(sb, " ");
+    
+
+    case .INTEGER;  #through;
     case .FLOAT;
-      print("% %\n", name, value);
+      if print_name {
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_gon_string(sb, name);
+        print_to_builder(sb, "%\n", value);
+      }
+      else print_to_builder(sb, "% ", value);
+
     case .STRING;
-      print("% \"%\"\n", name, value);
+      if print_name {
+        for 0..indent-1 print_to_builder(sb, " ");
+        print_gon_string(sb, name);
+        print_to_builder(sb, "\"%\"\n", value);
+      }
+      else print_to_builder(sb, "\"%\"\n", value);
 
     case;
-      print("We don't know how to print type \"%\" as a GON field!\n", any.type.type);
+      print_to_builder(sb, "We don't know how to print type \"%\" as a GON field!\n", value.type.type);
   }
-}
+}  
 
-print_struct_members_and_values :: (s: Any, indent: int = 0, omit: .. *Type_Info_Struct_Member) {
-  if s.type.type != .STRUCT {
-    print("This is not a struct.\n");
-    return;
-  }
-  struct_info := cast(*Type_Info_Struct) s.type;
-  
-  INDENT_AMOUNT :: 2;
-  child_indent := indent + INDENT_AMOUNT;
-
-  print("{\n");
-  for * m: struct_info.members {
-    for o: omit if m == o continue m; // Omit struct members we don't want to print. Currently only used to omit the gon_name member.
-    m_value : Any;
-    m_value.type = m.type;
-    m_value.value_pointer = s.value_pointer + m.offset_in_bytes;
-    for 1..child_indent print(" ");
-    if m.type.type == {
-      case .STRUCT;
-        // TODO: add if case to do custom printing for certain structs
-        // maybe it would be nice to have some comptime procedure to register custom serialization routines for structs in the struct definition instead of polluting this function wiht some huge if case
-        print("\"%\" ", m.name);
-        print_struct_members_and_values(m_value, child_indent);
-      case .ARRAY;
-        print("\"%\" ", m.name);
-        print_array_values(m_value, child_indent);
-      case;
-        print("\"%\" \"%\"\n", m.name, m_value);
-    }
-  }
-  for 0..indent-1 print(" ");
-  print("}\n");
+struct_member_has_note :: (m: *Type_Info_Struct_Member, note: string) -> bool {
+  for m.notes
+    if it == note
+      return true;
+  return false;
 }
 
 get_struct_member_with_note :: (struct_info: *Type_Info_Struct, note: string) -> *Type_Info_Struct_Member {
   for * m: struct_info.members
-    for m.notes
-      if it == note
+    if inline struct_member_has_note(m, note)
         return m;
   return null;
-}
-
-print_array_values :: (a: Any, indent: int = 0) {
-  if a.type.type != .ARRAY {
-    print("This is not an array.\n");
-    return;
-  }
-  array_info := cast(*Type_Info_Array) a.type;
-
-  count: s64;
-  data: *void;
-  if array_info.array_type == .FIXED {
-    count = array_info.array_count;
-    data  = a.value_pointer;
-  } else {
-    count = << cast(*s64)  (a.value_pointer);
-    data  = << cast(**void)(a.value_pointer + 8);
-  }
-
-  INDENT_AMOUNT :: 2;
-  child_indent := indent + INDENT_AMOUNT;
-
-  if array_info.element_type.type == {
-    case .STRUCT;
-      struct_info     := cast(*Type_Info_Struct)array_info.element_type;
-      gon_name_member := get_struct_member_with_note(struct_info, "gon_name");
-
-      if gon_name_member print("{\n");
-      else print("[\n");
-      for 0..count-1 {
-        item : Any = ---;
-        item.type = array_info.element_type;
-        item.value_pointer = data + array_info.element_type.runtime_size * it;
-        for 1..child_indent print(" ");
-        if gon_name_member print("\"%\" ", <<cast(*string)(item.value_pointer + gon_name_member.offset_in_bytes));
-        print_struct_members_and_values(item, child_indent, gon_name_member);
-      }
-      for 1..indent print(" ");
-      if gon_name_member print("}\n");
-      else print("]\n");
-
-    case .ARRAY;
-      print("[\n");
-      for 0..count-1 {
-        item : Any = ---;
-        item.type = array_info.element_type;
-        item.value_pointer = data + array_info.element_type.runtime_size * it;
-        for 1..child_indent print(" ");
-        print_array_values(item, child_indent);
-      }
-      print("]\n");
-    case;
-      print("[ ");
-      for 0..count-1 {
-        item : Any = ---;
-        item.type = array_info.element_type;
-        item.value_pointer = data + array_info.element_type.runtime_size * it;
-        print("\"%\", ", item);
-      }
-      print("]\n");
-  }
 }
 
 GonType :: enum u8 {
@@ -178,7 +224,7 @@ GonField :: struct {
   array_index  : int;
 };
 
-GonDataBinding :: struct {
+DataBinding :: struct {
   // interface
   field_address : [] string;
   data_binding  : Any;
@@ -187,16 +233,15 @@ GonDataBinding :: struct {
   tracker : int = 0;
 }
 
-GonParseContext :: struct {
+ParseContext :: struct {
   // interface
   file          : string;  // the entire file being parsed
-  data_bindings : [] GonDataBinding;
-  event_handler : GonEventHandler;
+  data_bindings : [] DataBinding;
+  event_handler : EventHandler;
 
   // internal
-  cursor     : int = 0; // current position in the file being parsed
-  depth      : int = 0;
-  line_count : int = 0;
+  cursor : int = 0; // current position in the file being parsed
+  depth  : int = 0;
 }
 
 GonTokenType :: enum {
@@ -209,43 +254,20 @@ GonTokenType :: enum {
   EOF;
 }
 
-GonEventHandler :: struct {
-  object_begin : (*GonParseContext, *GonField) -> bool;
-  object_end   : (*GonParseContext, *GonField) -> bool;
-  array_begin  : (*GonParseContext, *GonField) -> bool;
-  array_end    : (*GonParseContext, *GonField) -> bool;
-
+EventHandler :: struct {
+  object_begin,
+  object_end,
+  field_read,
+  field_data_bind,
+  parent_data_bind
+   : (*ParseContext, *GonField) -> GonReturnCode;
 }
 
-// gon_match_field_name_and_type :: (parent: *GonField, field: *GonField, data: Any) -> bool {
-//   using condition_data : *struct {
-//     gon_field_name : string;
-//     gon_field_type : GonType;
-//   } = xx data.value_pointer;
-
-//   return field.name     == gon_field_name
-//       && field.type == gon_field_type;
-// }
-
-// gon_scan_for_object_or_array_end :: inline (using parse_context: *GonParseContext, begin_token: u8, end_token: u8) -> bool {
-//   nested : int = 0;
-//   while true {
-//     if !advance_cursor(gon_string) return false;
-//     nested += xx (file[cursor] == begin_token);
-//     nested -= xx (file[cursor] == end_token  );
-//     if nested < 0 {
-//       if !advance_cursor(gon_string) return false; // advance one more character after hitting end token
-//       return true;
-//     }
-//   }
-//   return false; // unreachable
-// }
-// gon_scan_for_object_end :: inline (using parse_context: *GonParseContext) -> string, bool {
-//   return gon_string, gon_scan_for_object_or_array_end(*gon_string, #char "{", #char "}");
-// }
-// gon_scan_for_array_end :: inline (using parse_context: *GonParseContext) -> string, bool {
-//   return gon_string, gon_scan_for_object_or_array_end(*gon_string, #char "[", #char "]");
-// }
+GonReturnCode :: enum {
+  ERROR   :: 0;
+  SUCCESS :: 1;
+  SKIP_BINDING;
+}
 
 // Print field names in reverse order up to root of file
 print_field_stack :: (field: *GonField) {
@@ -258,20 +280,28 @@ print_field_stack :: (field: *GonField) {
   }
 }
 
-set_field_data_binding :: (field: *GonField, data_binding: *Any) -> bool {
-  // If the gon type is a field, just set the value directly, 
-  //   no need to store the data binding. (But perhaps we should anyways?)
+set_field_data_binding :: (using parse_context: *ParseContext, field: *GonField, data_binding: *Any) -> bool {
+  // print("Data binding on field: ");
+  // print_field_stack(field);
+  // print("\n");
+
   if field.type == .FIELD {
     assert(data_binding.type.type == .INTEGER 
-        || data_binding.type.type == .FLOAT
-        || data_binding.type.type == .STRING
+        || data_binding.type.type == .FLOAT 
+        || data_binding.type.type == .STRING 
         || data_binding.type.type == .ENUM);
-    if !set_value_from_string(data_binding, *field.value)
-      return false;
+    field.data_binding = <<data_binding;
+
+    event_result : GonReturnCode = .SUCCESS;
+    if event_handler.field_data_bind {
+      event_result = event_handler.field_data_bind(parse_context, field);
+      if event_result == .ERROR return false;
+    }
+    if event_result != .SKIP_BINDING {
+      if !set_value_from_string(data_binding, *field.value) return false;
+    }
   }
-  // If the gon type is object or array, we need to store the binding 
-  //   so that we can load values from the child gon fields.
-  else {
+  else { // field type is either object or array
     // Type checks
     if data_binding.type.type == {
       case .ARRAY;
@@ -280,17 +310,14 @@ set_field_data_binding :: (field: *GonField, data_binding: *Any) -> bool {
         // Save field name to struct member with @gon_name tag.
         // Only if parent's GON type is object and Jai type is array.
         if field.parent      != null
-        && field.parent.type == .OBJECT
-        && field.parent.data_binding.type      != null
-        && field.parent.data_binding.type.type == .ARRAY {
+        && field.parent.type == .OBJECT {
           ti_struct := cast(*Type_Info_Struct) data_binding.type;
           gon_name_member := get_struct_member_with_note(ti_struct, "gon_name");
           if gon_name_member {
             gon_name_member_any : Any;
             gon_name_member_any.value_pointer = data_binding.value_pointer + gon_name_member.offset_in_bytes;
             gon_name_member_any.type = gon_name_member.type;
-            if !set_value_from_string(*gon_name_member_any, *field.name)
-              return false;
+            if !set_value_from_string(*gon_name_member_any, *field.name) return false;
           }
         }
       case .ENUM;
@@ -302,15 +329,28 @@ set_field_data_binding :: (field: *GonField, data_binding: *Any) -> bool {
         }
       case;
         print("Gon Parse Error: Invalid data binding. GON type % cannot be bound to a %\n", field.type, data_binding.type.type);
+        print("parent: %\n", field.parent.*);
+        print("field: %\n", field.*);
+        print("data binding: %\n", data_binding.*);
         return false;
     }
     field.data_binding = <<data_binding;
+    event_result : GonReturnCode = .SUCCESS;
+    if event_handler.field_data_bind {
+      event_result = event_handler.field_data_bind(parse_context, field);
+      if event_result == .ERROR return false;
+    }
   }
 
   return true;
 }
 
-parse_file :: inline (using parse_context: *GonParseContext) -> bool {
+/*
+  This procedure just calls parse_object with a null parent.
+  In the future, we may decide to construct a default root object, 
+    so that we can allow setting a data binding to the root of the file.
+*/
+parse_file :: inline (using parse_context: *ParseContext) -> bool {
   return parse_object(parse_context, null);
 }
 
@@ -320,7 +360,7 @@ parse_file :: inline (using parse_context: *GonParseContext) -> bool {
     pulling tokens as necessary.
   This function is recursive, calling itself each time we step into an object or array.
 */
-parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bool {
+parse_object :: (using parse_context: *ParseContext, parent: *GonField) -> bool {
   next_token_type : GonTokenType;
   next_token      : string;
 
@@ -330,7 +370,10 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
   while true { 
     defer field_index += 1;
     field : GonField;
-    field.parent = parent; // allows us to traverse the field stack
+    // A pointer to the parent field is stored so that we can traverse up the field stack given only a pointer to the current field.
+    // This is important when writing callback code for the parent_data_bind event handler.
+    field.parent = parent;
+    field.array_index = field_index;
 
     // read field name
     if parent == null || parent.type != .ARRAY {
@@ -389,7 +432,7 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
     assert((field.value.data != null) == (field.type == .FIELD));
     assert((field.name.data  == null) == ((parent != null) && (parent.type == .ARRAY)));
     
-    // Check for callbacks on field before data bindings
+    if event_handler.field_read then event_handler.field_read(parse_context, *field);
 
     // Check for direct data bindings on field
     for * b: data_bindings {
@@ -406,10 +449,7 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
       // check if we've matched the entire field address
       if b.field_address.count == b.tracker {
         b.tracker = -1; // deactivate the binding so that it will be skipped in future checks
-        print("Data binding on field: ");
-        print_field_stack(*field);
-        print("\n");
-        if !set_field_data_binding(*field, *b.data_binding) return false;
+        if !set_field_data_binding(parse_context, *field, *b.data_binding) return false;
       }
     }
 
@@ -420,77 +460,91 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
       Likewise for gon arrays, though those can also be bound to enum flags.
     */
     if parent != null && parent.data_binding.value_pointer {
-      if parent.data_binding.type.type == {
-        case .STRUCT;
-          ti_struct := cast(*Type_Info_Struct) parent.data_binding.type;
+      /*
+        Handle the parent_data_bind event.
+        This is the best place to handle bindings to polymorphic structs or complex data structures, 
+          where custom code is required in order to add elements.
+      */
+      event_result : GonReturnCode = .SUCCESS;
+      if event_handler.parent_data_bind {
+        event_result = event_handler.parent_data_bind(parse_context, *field);
+        if event_result == .ERROR return false;
+      }
+      /*
+        The usual code for indirect data bindings handles regular non-polymorphic structs, arrays, and enum_flags.
+        This will be skipped if the parent data bind event returns SKIP_BINDING.
+      */
+      if event_result != .SKIP_BINDING {
+        if parent.data_binding.type.type == {
+          case .STRUCT;
+            ti_struct := cast(*Type_Info_Struct) parent.data_binding.type;
+            /* 
+              The method of getting the struct member to assign to depends on gon type.
+              If the gon type is object, we match on the member/field name.
+              If the gon type is array, we match on the index of the member/field.
+            */
+            member : Type_Info_Struct_Member;
+            if parent.type == {
+            case .OBJECT;
+              member = get_field(ti_struct, field.name);
+            case .ARRAY;
+              if field_index < ti_struct.members.count {
+                member = ti_struct.members[field_index];
+              }
+              else { 
+                print("Gon Parse Warning: too many fields in array-type struct definition.");
+                // TODO: better warning message. print field stack ?
+              }
+            case;
+              print("Gon Parse Error: parent object data binding was invalid.\n");
+              // TODO: maybe better error message?
+              return false;
+            }
 
-          /* 
-            The method of getting the struct member to assign to depends on gon type.
-            If the gon type is object, we match on the member/field name.
-            If the gon type is array, we match on the index of the member/field.
-          */
-          member : Type_Info_Struct_Member;
-          if parent.type == {
-          case .OBJECT;
-            member = get_field(ti_struct, field.name);
+            if (member.type) {
+              data_binding : Any = --- ;
+              data_binding.value_pointer = parent.data_binding.value_pointer + member.offset_in_bytes;
+              data_binding.type = member.type;
+              if !set_field_data_binding(parse_context, *field, *data_binding) return false;
+            }
+
           case .ARRAY;
-            if field_index < ti_struct.members.count {
-              member = ti_struct.members[field_index];
+            ti_array := cast(*Type_Info_Array) parent.data_binding.type;
+
+            // determine element destination
+            element : Any = ---;
+            if ti_array.array_type == {
+              case .FIXED;
+                if field_index >= ti_array.array_count {
+                  print("Unable to add item to array, array has already reached capacity.\n");
+                  return false;
+                  // TODO: add error option to ignore too many elements in GON array markup of struct
+                }
+                element.value_pointer = parent.data_binding.value_pointer + field_index * ti_array.element_type.runtime_size;
+                element.type = ti_array.element_type;
+
+              case .VIEW;
+                /* 
+                  Despite not actually being a resizable array, this cast is fine for our purposes.
+                  We only need to access the data and count members, which are spec'd to line up for array views and resizable arrays.
+                */
+                array := cast(*Resizable_Array) parent.data_binding.value_pointer;
+                if field_index >= array.count {
+                  print("Unable to add item to array, array has already reached capacity.\n");
+                  return false;
+                  // TODO: add error option to ignore too many elements in GON array markup of struct
+                }
+                element.value_pointer = cast(*u8)array.data + field_index * ti_array.element_type.runtime_size;
+                element.type = ti_array.element_type;
+
+              case .RESIZABLE;
+                element = array_add_any_nocheck(xx parent.data_binding.value_pointer, ti_array.element_type);
             }
-            else { 
-              print("Gon Parse Warning: too many fields in array-type struct definition.");
-              // TODO: better warning message. print field stack ?
-            }
-          case;
-            print("Gon Parse Error: parent object data binding was invalid.\n");
-            // TODO: maybe better error message?
-            return false;
-          }
+            if !set_field_data_binding(parse_context, *field, *element) return false;
 
-          if (member.type) {
-            data_binding : Any = --- ;
-            data_binding.value_pointer = parent.data_binding.value_pointer + member.offset_in_bytes;
-            data_binding.type = member.type;
-            if !set_field_data_binding(*field, *data_binding) return false;
-          }
-
-        case .ARRAY;
-          ti_array := cast(*Type_Info_Array) parent.data_binding.type;
-
-          // determine element destination
-          element : Any = ---;
-          if ti_array.array_type == {
-            case .FIXED;
-              if field_index >= ti_array.array_count {
-                print("Unable to add item to array, array has already reached capacity.\n");
-                return false;
-              }
-              element.value_pointer = parent.data_binding.value_pointer + field_index * ti_array.element_type.runtime_size;
-              element.type = ti_array.element_type;
-              if !set_field_data_binding(*field, *element) return false;
-
-            case .VIEW;
-              /* 
-                Despite not actually being a resizable array, this cast is fine for our purposes.
-                We only need to access the data and count members, which are spec'd to line up for array views and resizable arrays.
-              */
-              array := cast(*Resizable_Array) parent.data_binding.value_pointer;
-              if field_index >= array.count {
-                print("Unable to add item to array, array has already reached capacity.\n");
-                return false;
-              }
-              element.value_pointer = cast(*u8)array.data + field_index * ti_array.element_type.runtime_size;
-              element.type = ti_array.element_type;
-              if !set_field_data_binding(*field, *element) return false;
-
-
-            case .RESIZABLE;
-              element = array_add_any_nocheck(xx parent.data_binding.value_pointer, ti_array.element_type);
-              if !set_field_data_binding(*field, *element) return false;
-          }
-
-        case .ENUM;
-          if !set_field_data_binding(*field, *parent.data_binding) return false;
+          case .ENUM;
+            if !set_field_data_binding(parse_context, *field, *parent.data_binding) return false;
+        }
       }
     }
 
@@ -498,20 +552,15 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
     if field.type == .OBJECT 
     || field.type == .ARRAY {
       depth += 1;
+      if event_handler.object_begin then event_handler.object_begin(parse_context, *field);
       if !parse_object(parse_context, *field) return false;
+      if event_handler.object_end then event_handler.object_end(parse_context, *field);
       depth -= 1;
       // when we come back up from an object or array, decrement bindings' tracker values
       for * b: data_bindings {
         if b.tracker > depth then b.tracker -= 1;
       }
     }
-
-    /*
-      Check for callbacks on field before data bindings
-    */
-
-
-
   } // end main loop
 
   return true;
@@ -520,107 +569,100 @@ parse_object :: (using parse_context: *GonParseContext, parent: *GonField) -> bo
 /*
   Test function that simply prints all of the tokens in a GON file on individual lines.
 */
-print_all_tokens :: (using parse_context: *GonParseContext) {
+print_all_tokens :: (using parse_context: *ParseContext) {
   next_token_type : GonTokenType;
   next_token      : string;
-  
   print("Tokens in file: \n");
-
   while true {
     next_token_type, next_token = get_next_token(parse_context);
     if next_token_type == {
-      case .INVALID; 
-        print("invalid pat!\n");
-        return;
-      case .EOF; 
-        print("graceful pat!\n");
-        return;
-      case;
-        print("\"%\" ", next_token);
+      case .INVALID; return;
+      case .EOF;     return;
+      case; print("\"%\" ", next_token);
     }
   }
-
   print("\n");
 }
 
 // Returns the type and string value of the next token in the file.
 // This function will advance the cursor to 1 char after the end of the next token.
-get_next_token :: (using parse_context: *GonParseContext) -> GonTokenType, string {
+// TODO: stop returning strings for structural token cases, only return strings for actual string tokens
+get_next_token :: (using parse_context: *ParseContext) -> GonTokenType, string {
   if cursor == file.count return .EOF, ""; 
   if !skip_whitespace_and_comments(parse_context) return .EOF, "";
   assert(cursor <= file.count);
-  // TODO: could probably clean up the above a little 
-  //    I'm not sure if we need the eof check both before and after skip_whitespace
-  //    The assert condition can probably be removed, may move >= to eof check just in case
 
-  str : string = ---;
-  str.data = *file[cursor];
-
-  // check for single char (structural) tokens
-  str.count = 1;
-  if str[0] == #char "{" {
-    if !advance_cursor(parse_context) 
-      return .INVALID, str;
-    return .OBJECT_BEGIN, str;
-  }
-  if str[0] == #char "}" {
-    if !advance_cursor(parse_context) 
-      return .INVALID, str;
-    return .OBJECT_END, str;
-  }
-  if str[0] == #char "[" {
-    if !advance_cursor(parse_context) 
-      return .INVALID, str;
-    return .ARRAY_BEGIN, str;
-  }
-  if str[0] == #char "]" {
-    if !advance_cursor(parse_context) 
-      return .INVALID, str;
-    return .ARRAY_END, str;
+  if file[cursor] == {
+    case #char "{";
+      if !move_cursor(parse_context) 
+        return .INVALID, "";
+      return .OBJECT_BEGIN, "";
+    case #char "}";
+      if !move_cursor(parse_context) 
+        return .INVALID, "";
+      return .OBJECT_END, "";
+    case #char "[";
+      if !move_cursor(parse_context) 
+        return .INVALID, "";
+      return .ARRAY_BEGIN, "";
+    case #char "]";
+      if !move_cursor(parse_context) 
+        return .INVALID, "";
+      return .ARRAY_END, "";
   }
 
-  // string token
-  str.count = 0;
-  // scan for end of string in quotation marks
+  // Next token is a string token
+  string_start := cursor;
+
+  // Scan for end of string in quotation marks
   if file[cursor] == #char "\"" {
-    str.data += 1;
-    if !advance_cursor(parse_context) 
-      return .INVALID, str; 
+    if !move_cursor(parse_context) 
+      return .INVALID, ""; 
+
     while file[cursor] != #char "\"" {
       adv : int = 1;
       if file[cursor] == #char "\\" 
         then adv = 2;
-      defer str.count += adv;
-      if !advance_cursor(parse_context) 
-        return .INVALID, str;
+      if !move_cursor(parse_context, adv) 
+        return .INVALID, "";
     }
-    if !advance_cursor(parse_context) 
-      return .INVALID, str;
+
+    if !move_cursor(parse_context) 
+      return .INVALID, "";
+
+    str : string = ---;
+    str.data  = *file[string_start + 1];    // add 1 to string_start for opening quotes
+    str.count = cursor - string_start - 2;  // subtract 2 from length for opening and closing quotes
     return .STRING, str;
   }
 
-  // scan for end of bare string
+  // Scan for end of bare string
   if !is_reserved_char(file[cursor]) {
-    while !is_reserved_char(file[cursor]) 
-       && !is_whitespace(file[cursor]) {
-      defer str.count += 1;
-      if !advance_cursor(parse_context) 
-        return .INVALID, str;
-    }
+    while !is_reserved_char(file[cursor]) && !is_whitespace(file[cursor]) 
+      if !move_cursor(parse_context) 
+        return .INVALID, "";
+    
+    str : string = ---;
+    str.data  = *file[string_start];
+    str.count = cursor - string_start;
     return .STRING, str;
   }
 
-  print("funky\n");
-  return .INVALID, ""; // probably had some funky character in there
+  // There's probably some funky character in the file...?
+  print("Something funky happened.\n");
+  return .INVALID, "";
 }
 
-// TODO?: replace with a macro (gon_move_cursor)
-advance_cursor :: inline (using parse_context: *GonParseContext, amount: s64 = 1) -> bool {
+move_cursor :: inline (using parse_context: *ParseContext, amount: s64 = 1) -> bool {
   if cursor + amount > file.count
     return false;
   cursor += amount;
   return true;
 }
+
+whitespace_chars :: " ,\t\r\n";
+reserved_chars   :: "#{}[]\"";
+whitespace_and_reserved_chars :: " ,\t\r\n#{}[]\"";
 
 is_whitespace :: inline (char: u8) -> bool {
   return char == #char " "
@@ -630,20 +672,22 @@ is_whitespace :: inline (char: u8) -> bool {
       || char == #char "\n";
 }
 
-is_whitespace :: inline (char: u8, newline_count: *int) -> bool {
-  if char == #char " "
-  || char == #char ","
-  || char == #char "\t"
-  || char == #char "\r"
-    return true;
+// TODO: Figure out a better way to count newline characters.
+// is_whitespace :: inline (char: u8, newline_count: *int) -> bool {
+//   if char == #char " "
+//   || char == #char ","
+//   || char == #char "\t"
+//   || char == #char "\r"
+//     return true;
 
-  if char == #char "\n" {
-    <<newline_count += 1;
-    return true;
-  }
+//   if char == #char "\n" {
+//     <<newline_count += 1;
+//     return true;
+//   }
 
-  return false;
-}
+//   return false;
+// }
+
 
 is_reserved_char :: inline (char: u8) -> bool {
   return char == #char "#"
@@ -654,16 +698,16 @@ is_reserved_char :: inline (char: u8) -> bool {
 }
 
 // cycles between skipping whitespace and comments until next character is neither
-skip_whitespace_and_comments :: inline (using parse_context: *GonParseContext) -> bool {
+skip_whitespace_and_comments :: inline (using parse_context: *ParseContext) -> bool {
   while true {
-    while is_whitespace(file[cursor], *line_count)
-      if !advance_cursor(parse_context) 
+    while is_whitespace(file[cursor])
+      if !move_cursor(parse_context) 
       || cursor == file.count 
         return false;
 
     if file[cursor] == #char "#" {
       while file[cursor] != #char "\n" 
-        if !advance_cursor(parse_context) 
+        if !move_cursor(parse_context) 
         || cursor == file.count 
           return false;
     }
@@ -779,7 +823,7 @@ set_value_from_string :: (any: *Any, text: *string) -> bool {
   By default, any error which causes a data-bound value not to be assigned is an actual error.
   Though this may change when I add error options. Just something to keep in mind.
 */
-array_add_any :: inline (array: Any, item: Any) -> bool {
+array_add_any :: inline (array: *Any, item: *Any) -> bool {
   // verify that array is in fact an array
   if array.type.type != .ARRAY {
     print("Array any is not an array!\n");
@@ -793,7 +837,7 @@ array_add_any :: inline (array: Any, item: Any) -> bool {
     return false;
   }
   
-  return array_add_any_nocheck(xx array.value_pointer, *item);
+  return array_add_any_nocheck(xx array.value_pointer, item);
 }
 
 array_add_any_nocheck :: (array: *Resizable_Array, item: *Any) -> bool {
@@ -812,7 +856,7 @@ array_add_any_nocheck :: (array: *Resizable_Array, item: *Any) -> bool {
   return true;
 }
 
-array_add_any :: inline (array: Any) -> Any, bool {
+array_add_any :: inline (array: *Any) -> Any, bool {
   any : Any;
 
   // verify that array is in fact an array
@@ -849,7 +893,7 @@ array_add_any_nocheck  :: (array: *Resizable_Array, type: *Type_Info) -> Any {
   This procedure is duplicated verbatim from Basic/Array, since the procedure is limited to file scope there.
   We need this in order to properly reserve space for any type of resizeable array.
   Perhaps there's a way to get import it from basic despite being file scoped?
-    I'll have to look into that shortly...
+    I'll have to look into that eventually...
 */
 array_reserve_nonpoly :: (array: *[..] *void, desired_items: s64, size: s64) {
     if desired_items <= array.allocated return;
@@ -865,3 +909,4 @@ array_reserve_nonpoly :: (array: *[..] *void, desired_items: s64, size: s64) {
 #import "Basic";
 #import "Reflection";
 #import "File";
+#import "String";
