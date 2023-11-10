@@ -11,4 +11,4 @@ This can be used to implement custom data loading procedures for special types, 
 And all of this is done in a single linear pass over the source file.
 The result is an extremely powerful and easy to use parser with a negligible memory footprint. 
 
-For a more extensive description of the project, please visit https://github.com/Stuart-Mouse/jai-gon.
+For a more extensive description of the project, please visit stuart-mouse.github.io/jai-gon.
