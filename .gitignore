@@ -1,0 +1,10 @@
+
+build/
+*.exe
+*.pdb
+*.raddbgi
+*.rdi
+
+notes.md
+examples/test.jai
+examples/.build

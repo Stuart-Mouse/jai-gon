@@ -1,0 +1,19 @@
+
+things {
+    "Thing 1" {
+        numbers [ 35, 7, 104, 3, 0 ]
+        fraction 35.35
+        text "this is a string"
+    }
+    "Thing 2" {
+        numbers [ 35, 7, 105, 3, &"../../'Thing 3'" ]
+        fraction 35.35
+        text $"../'Thing 1'/text"
+    }
+    "Thing 3" {
+        $"../'Thing 1'"
+        text "this is a replacement string"
+    }
+}
+
+flags [ first, third ]
