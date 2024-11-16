@@ -39,9 +39,9 @@ DOM_Node :: struct {
     parent       : *DOM_Node;
     next         : *DOM_Node;
     prev         : *DOM_Node;
-
-    source_line  : int;
-
+    
+    // src_loc      : Source_Location;
+    
     name         : string;
     type         : Node_Type;
     flags        : DOM_Node_Flags;
@@ -103,23 +103,23 @@ get_node_index :: (node: *DOM_Node) -> int {
 }
 
 // does not delete the passed node or its neighbors, only children
-delete_child_nodes_recursive :: (node: *DOM_Node) {
-    if node.type == .OBJECT || node.type == .ARRAY {
-        for child: node.children {
-            delete_child_nodes_recursive(child);
-            free(child);
-        }
-    }
-}
+// delete_child_nodes_recursive :: (node: *DOM_Node) {
+//     if node.type == .OBJECT || node.type == .ARRAY {
+//         for child: node.children {
+//             delete_child_nodes_recursive(child);
+//             free(child);
+//         }
+//     }
+// }
 
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
     t: Tokenizer = .{ file = path };
-    consume_token(*t);
+    get_token(*t); // TODO: note why?
     
     index := 0;
     while node != null {
-        next, ok := get_next_token_from_path_string(*t);
-        if !ok return null, 0;
+        next := get_next_token_from_path_string(*t);
+        if next.type == .ERROR return null, 0;
         if next.type == .EOF break;
         if next.type == .PATH_PARENT { 
             node = node.parent; 
@@ -157,7 +157,7 @@ append_data_node :: (parent: *DOM_Node, path: string, data_binding: Any, prepend
 
 // does the bare minimum to append a node, not even giving it a name
 // after the node is appended, caller should initialize it
-append_child_node :: (parent: *DOM_Node, prepend: bool = false) ->  *DOM_Node {
+append_child_node :: (parent: *DOM_Node, prepend := false) ->  *DOM_Node {
     node := New(DOM_Node);
     // if !node return null;
     
@@ -190,7 +190,7 @@ append_child_node :: (parent: *DOM_Node, prepend: bool = false) ->  *DOM_Node {
 }
 
 // may be a little bit odd, but if you want tell if a node was overwritten or not, check if type == .INVALID. if so, then the node was either created or overwritten
-get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend: bool = false) ->  *DOM_Node {
+get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend := false) ->  *DOM_Node {
     node: *DOM_Node;
     
     if behavior != .DEFAULT {
@@ -212,11 +212,11 @@ append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insert
     node := parent;
     
     t: Tokenizer = .{ file = path };
-    consume_token(*t);
+    get_token(*t);
     
     while true {
-        next, ok := get_next_token_from_path_string(*t);
-        if !ok  return null;
+        next := get_next_token_from_path_string(*t);
+        if next.type == .ERROR  return null;
         
         if peek_token(*t).type == .EOF {
             return get_or_add_child_node(node, next.text, behavior, prepend);
@@ -246,7 +246,7 @@ remove_node :: (node: *DOM_Node) {
     if node.prev != null          node.prev.next    = node.next;
     if node.parent.first == node  node.parent.first = node.next;
     if node.parent.last  == node  node.parent.last  = node.prev;
-    free(node);
+    // NOTE: no need to free now that we are using pool for allocating nodes
 }
 
 
@@ -259,10 +259,11 @@ clone_child_nodes_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
 }
 
 clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {    
-    if dst.type == .OBJECT {
-        delete_child_nodes_recursive(dst);
-    }
-
+    // free child nodes so we can overwrite
+    // if dst.type == .OBJECT {
+    //     delete_child_nodes_recursive(dst);
+    // }
+    
     dst.name         = src.name;
     dst.type         = src.type;
     dst.flags        = src.flags;
@@ -270,29 +271,28 @@ clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
     dst.content      = .{};
 
     if src.type == {
-        case .OBJECT; #through;
-        case .ARRAY;
-            return clone_child_nodes_recursive(dst, src);
-            
-        case .REF;
-            dst.ref = src.ref;
-            if dst.ref.type == .VALUE {
-                log_error("ERROR: cloned a value ref node @ %v", format_node_path(dst));
-            }
-            
-        case .FIELD;
-            dst.value = src.value;
-            
-        case .INVALID;
-            return false;
+      case .OBJECT; #through;
+      case .ARRAY;
+        return clone_child_nodes_recursive(dst, src);
+        
+      case .REF;
+        dst.ref = src.ref;
+        if dst.ref.type == .VALUE {
+            log_error("ERROR: cloned a value ref node @ %v", format_node_path(dst));
+        }
+        
+      case .FIELD;
+        dst.value = src.value;
+        
+      case .INVALID;
+        return false;
     }
     
     return true;
 }
 
-get_next_token_from_path_string :: (t: *Tokenizer) -> (Token, bool) {
-    next, ok := get_token(t);
-    if !ok  return .{}, false;
+get_next_token_from_path_string :: (t: *Tokenizer) -> Token {
+    next := get_token_or_return(t, .{ type = .ERROR });
     
     if next.type == {
         case .EOF;
@@ -300,16 +300,11 @@ get_next_token_from_path_string :: (t: *Tokenizer) -> (Token, bool) {
         case .STRING; 
             // no op
         case; 
-            return .{}, false;
+            return .{ type = .ERROR };
     }
     
-    if peek_token(t).type == {
-        case .EOF        ; // no op
-        case .PATH_SPLIT ; consume_token(t);
-        case             ; return .{}, false;
-    }
-    
-    return next, true;
+    expect_token_type(t, .PATH_SPLIT);
+    return next;
 }
 
 format_node_path :: (node: *DOM_Node) -> string {

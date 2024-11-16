@@ -6,19 +6,6 @@
     For now, do whatever you wish with the code, so long as it's good. And make sure to link back to this original project.
 */
 
-#import "Basic";
-#import "Reflection";
-#import "String";
-#import "Hash_Table";
-// #import "";
-
-#load "dom.jai";
-#load "parse.jai";
-#load "serialize.jai";
-#load "tokenize.jai";
-#load "io_data.jai";
-
-
 struct_member_has_note :: (m: *Type_Info_Struct_Member, note: string) -> bool {
     for m.notes
         if it == note
@@ -311,3 +298,18 @@ dynamic_new :: (type: Type) -> Any {
         id   = type_info(type),
     };
 }
+
+
+#scope_module
+
+#import "Basic";
+#import "Reflection";
+#import "String";
+#import "Hash_Table";
+#import "Flat_Pool";
+
+#load "dom.jai";
+#load "parse.jai";
+#load "serialize.jai";
+#load "tokenize.jai";
+#load "io_data.jai";

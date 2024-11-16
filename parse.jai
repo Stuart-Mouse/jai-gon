@@ -10,30 +10,33 @@ Parser_Callback :: #type (*DOM_Node) -> bool;
 Parser :: struct {
     tokenizer      : Tokenizer;
     dom_root       : *DOM_Node;
+    node_pool      : Flat_Pool; 
     node_allocator : Allocator;
     callbacks      : [..] Parser_Callback;
 };
 
-init_parser :: (using parser: *Parser, _file: string, _allocator: Allocator = .{}) {
-    node_allocator = _allocator;
+init_parser :: (using parser: *Parser, _file: string) {
+    reset(*node_pool, overwrite_memory = true);
+    node_allocator = .{
+        proc = flat_pool_allocator_proc,
+        data = *node_pool,
+    };
     tokenizer.file = _file;
-    consume_token(*tokenizer); // get the first token when we init, we always pull one token ahead of the one we return
+    init_tokenizer(*tokenizer);
 }
 
 deinit_parser :: (using parser: *Parser) {
-    delete_child_nodes_recursive(dom_root,, node_allocator);
-    free(dom_root,, node_allocator);
+    fini(*node_pool);
     dom_root = null;
     
     array_free(callbacks);
-    callbacks = xx 0;
 }
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
-// after calling this, you can just add your data bindings and then ess them
-parse_file_to_dom :: (file: string, allocator: Allocator = .{}) -> (Parser, bool) {
+// after calling this, you can just add your data bindings and then process them
+parse_file_to_dom :: (file: string) -> (Parser, bool) {
     parser: Parser;
-    init_parser(*parser, file, allocator);
+    init_parser(*parser, file);
     
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
     if !validate_node_references   (*parser)  return .{}, false;
@@ -44,7 +47,7 @@ parse_file_to_dom :: (file: string, allocator: Allocator = .{}) -> (Parser, bool
 /*
     We are no longer appending to a dynamic array of data bindings, instead just inserting those data bindings immediately when this is called by the user.
     Which is nice because that means we save a little bit of memory on that and we don't need the Data_Binding struct Anymore.
-    We also don't have to split the path into substrings, since we just ess it one piece at a time as we insert the binding.
+    We also don't have to split the path into substrings, since we just process it one piece at a time as we insert the binding.
 */
 add_data_binding_to_dom :: (using parser: *Parser, binding: Any, path: string) -> bool {
     node := find_node_by_path(parser.dom_root, path);
@@ -59,7 +62,7 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
 }
 
 validate_node_references :: (using parser: *Parser) -> bool {
-    Result :: enum_flags { ERROR; COMPLETE; PROGRESS; REMOVE_NODE; };
+    Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
 
     recurse :: (using parser: *Parser, node: *DOM_Node) -> Result {
         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
@@ -103,7 +106,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                     // maybe we collect warnings in some array and only print on error
                     // would want to enumerate error types and store node, then format and print later
                     log("WARNING: Cannot resolve ref from % to %", format_node_path(node), node.ref.text);
-                    return xx 0;
+                    return .NONE;
                 }
                 node.ref.node = ref_node;
                 
@@ -116,7 +119,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 // value ref to value ref cannot be resolved yet
                 if node.ref.node.type == .REF && node.ref.node.ref.type == .VALUE {
                     log("WARNING: Cannot resolve value ref to value ref: %", format_node_path(node));
-                    return xx 0;
+                    return .NONE;
                 }
                 
                 result: Result = .PROGRESS | .COMPLETE;
@@ -126,9 +129,9 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 
                     // we can't copy these nodes until they are all resolved, otherwise we get issues
                     if !(.REFERENCES_RESOLVED & ref_node.flags) {
-                        return xx 0;
+                        return .NONE;
                     }
-                
+                    
                     parent := node.parent;
                     for child: ref_node.children {
                         dst := find_child_node_by_name(parent, child.name);
@@ -220,7 +223,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
                         return true;
                     }
                     
-                    // COME BACK HERE
+                    // COME BACK HERE (LATER: AND DO WHAT?)
                     ref_ti     := node.ref.node.data_binding.type;
                     binding_ti := (cast(*Type_Info_Pointer) *node.data_binding.type).pointer_to;
                     if ref_ti != binding_ti {
@@ -231,7 +234,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
                     return true;
                     
                 case;
-                    log("ERROR: got a ref of type % in ess_node_binding.", node.ref.type);
+                    log("ERROR: got a ref of type % in process_node_binding.", node.ref.type);
                     return false;
             }
             
@@ -244,15 +247,9 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     next_token : Token;
     ok         : bool;
     
-    dom_root      = New(DOM_Node,, allocator = node_allocator);
+    dom_root      = New(DOM_Node,, node_allocator);
     dom_root.name = "root";
     dom_root.type = .OBJECT;
-    
-    success := false;
-    defer if !success {
-        delete_child_nodes_recursive(dom_root,, node_allocator);
-        free(dom_root,, node_allocator);
-    }
     
     parent := dom_root;
     while L_Loop := (parent != null) {
@@ -266,8 +263,8 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         } else {
             // read field name
             if parent.type != .ARRAY {
-                next_token, ok = get_token(*tokenizer);
-                if !ok {
+                next_token = get_token(*tokenizer);
+                if next_token.type == .ERROR {
                     log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
                     return false;
                 }
@@ -297,8 +294,8 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             }
         }
         
-        next_token, ok = get_token(*tokenizer);
-        if !ok {
+        next_token = get_token(*tokenizer);
+        if next_token.type == .ERROR {
             log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
             return false;
         }
@@ -318,8 +315,8 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 case .REF_VALUE   ; node.ref.type = .VALUE;
             }
             
-            next_token, ok = get_token(*tokenizer);
-            if !ok {
+            next_token = get_token(*tokenizer);
+            if next_token.type == .ERROR {
                 log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
                 return false;
             }
@@ -365,7 +362,6 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         }
     }
     
-    success = true;
     return true;
 }
 
@@ -519,7 +515,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     */
                     
                 case;
-                    log("Invalid data binding, mismatched gon/internal type.");
+                    log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
                     return false;
             }
         
@@ -612,7 +608,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                     
                 case;
-                    log("Data binding error: mismatched gon/internal type.");
+                    log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
                     return false;
             }
 
@@ -638,7 +634,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 // TODO: permit structs which have custom parsing procedures defined
                 
                 case;
-                    log("Invalid data binding, mismatched gon/internal type.");
+                    log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
                     return false;
             }
 
