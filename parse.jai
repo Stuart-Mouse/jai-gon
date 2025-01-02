@@ -8,11 +8,11 @@ Parser_Callback :: #type (*DOM_Node) -> bool;
 
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
-    tokenizer      : Tokenizer;
-    dom_root       : *DOM_Node;
-    node_pool      : Flat_Pool; 
-    node_allocator : Allocator;
-    callbacks      : [..] Parser_Callback;
+    tokenizer:          Tokenizer;
+    dom_root:           *DOM_Node;
+    node_pool:          Flat_Pool; 
+    node_allocator:     Allocator;
+    callbacks:          [..] Parser_Callback;
 };
 
 init_parser :: (using parser: *Parser, _file: string) {
@@ -310,9 +310,9 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             node.flags = flags;
             
             if next_token.type == {
-                case .REF_INDEX   ; node.ref.type = .INDEX;
-                case .REF_POINTER ; node.ref.type = .POINTER;
-                case .REF_VALUE   ; node.ref.type = .VALUE;
+                case .REF_INDEX;    node.ref.type = .INDEX;
+                case .REF_POINTER;  node.ref.type = .POINTER;
+                case .REF_VALUE;    node.ref.type = .VALUE;
             }
             
             next_token = get_token(*tokenizer);

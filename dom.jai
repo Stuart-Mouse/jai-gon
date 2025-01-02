@@ -40,17 +40,17 @@ DOM_Node :: struct {
     
     // src_loc      : Source_Location;
     
-    name:  string;
-    type:  Node_Type;
-    flags: DOM_Node_Flags;
+    name:   string;
+    type:   Node_Type;
+    flags:  DOM_Node_Flags;
     
     data_binding: Any;
     
     using content: union {
         ref: struct {
-            text: string;
-            node: *DOM_Node;
-            type: DOM_Node_Ref_Type;
+            text:   string;
+            node:   *DOM_Node;
+            type:   DOM_Node_Ref_Type;
         };
         
         value: string;
@@ -60,9 +60,9 @@ DOM_Node :: struct {
 }
 
 DOM_Node_List :: struct { 
-    first : *DOM_Node;
-    last  : *DOM_Node;
-    count : int;
+    first:  *DOM_Node;
+    last:   *DOM_Node;
+    count:  int;
 };
 
 for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {

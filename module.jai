@@ -86,10 +86,10 @@ set_value_from_string :: (any: Any, text: string) -> bool {
                     for enum_type.names {
                         if it == text {
                             if enum_type.runtime_size == {
-                                case 1; any.value_pointer.(*s8 ).* |= xx enum_type.values[it_index]; 
-                                case 2; any.value_pointer.(*s16).* |= xx enum_type.values[it_index]; 
-                                case 4; any.value_pointer.(*s32).* |= xx enum_type.values[it_index]; 
-                                case 8; any.value_pointer.(*s64).* |= xx enum_type.values[it_index]; 
+                                case 1; any.value_pointer.(*s8 ).* |= enum_type.values[it_index].(s8 ); 
+                                case 2; any.value_pointer.(*s16).* |= enum_type.values[it_index].(s16); 
+                                case 4; any.value_pointer.(*s32).* |= enum_type.values[it_index].(s32); 
+                                case 8; any.value_pointer.(*s64).* |= enum_type.values[it_index].(s64); 
                             }
                             return true;
                         }
@@ -99,10 +99,10 @@ set_value_from_string :: (any: Any, text: string) -> bool {
                     for enum_type.names {
                         if it == text {
                             if enum_type.runtime_size == {
-                                case 1; any.value_pointer.(*s8 ).* = xx enum_type.values[it_index]; 
-                                case 2; any.value_pointer.(*s16).* = xx enum_type.values[it_index]; 
-                                case 4; any.value_pointer.(*s32).* = xx enum_type.values[it_index]; 
-                                case 8; any.value_pointer.(*s64).* = xx enum_type.values[it_index]; 
+                                case 1; any.value_pointer.(*s8 ).* = enum_type.values[it_index].(s8 ); 
+                                case 2; any.value_pointer.(*s16).* = enum_type.values[it_index].(s16); 
+                                case 4; any.value_pointer.(*s32).* = enum_type.values[it_index].(s32); 
+                                case 8; any.value_pointer.(*s64).* = enum_type.values[it_index].(s64); 
                             }
                             return true;
                         }
@@ -115,7 +115,7 @@ set_value_from_string :: (any: Any, text: string) -> bool {
         case;
             return false;
     }
-  
+    
     return true;
 }
 
@@ -142,10 +142,7 @@ array_add_any_nocheck :: (array: *Resizable_Array, elem_type: *Type_Info) -> Any
         array_reserve_nonpoly(xx array, reserve, elem_type.runtime_size);
     }
     
-    ret := Any.{
-        value_pointer = array.data + (array.count * elem_type.runtime_size),
-        type          = elem_type,
-    };
+    ret := Any.{ elem_type, array.data + (array.count * elem_type.runtime_size) };
     array.count += 1;
     
     return ret;
@@ -180,10 +177,7 @@ array_add_any_at_index :: (array_any: Any, index: int) -> Any {
     
     raw_array.count = max(raw_array.count, index + 1);
     
-    return Any.{
-        value_pointer = raw_array.data + (index * ti_array.element_type.runtime_size),
-        type          = ti_array.element_type, 
-    };
+    return Any.{ ti_array.element_type, raw_array.data + (index * ti_array.element_type.runtime_size) };
 }
 
 // convert between any types whose underlying value is essentially an integer, using s64 as intermediate value
@@ -262,18 +256,8 @@ all_bytes_are_zero :: (any: Any) -> bool {
 }
 
 all_bytes_are_zero :: (data: *void, count: int) -> bool {
-    bytes: []u8 = ---;
-    bytes.data  = data;
-    bytes.count = count;
-    for bytes  if b != 0  return false;
+    for 0..count-1  if data.(*u8)[it] != 0  return false;
     return true;
-}
-
-dynamic_new :: (type: Type) -> Any {
-    return Any.{
-        data = alloc(type.runtime_size),
-        id   = type_info(type),
-    };
 }
 
 

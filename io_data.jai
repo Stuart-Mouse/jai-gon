@@ -25,9 +25,9 @@ Serialization_Flags :: enum_flags {
 }
 
 Serialization_Settings :: struct {
-    flags : Serialization_Flags;
+    flags: Serialization_Flags;
     // TODO: replace with an interface for user to insert nodes manually
-    to_string_proc : #type (Any) -> (string, string, bool);
+    to_string_proc: #type (Any) -> (string, string, bool);
 }
 
 Parse_Flags :: enum_flags {
@@ -54,17 +54,17 @@ Parse_Settings :: struct {
 */
 
 IO_Data :: struct {
-    parse     : Parse_Settings;
-    serialize : Serialization_Settings;
+    parse:      Parse_Settings;
+    serialize:  Serialization_Settings;
     
     // for structs only
-    name_member    : *Type_Info_Struct_Member;
-    map_key_member : *Type_Info_Struct_Member;
-    // member_data    : Table(*Type_Info_Struct_Member, IO_Data);
+    name_member:        *Type_Info_Struct_Member;
+    map_key_member:     *Type_Info_Struct_Member;
+    // member_data:        Table(*Type_Info_Struct_Member, IO_Data);
     
     // for arrays only
     // can be used to index any array using an enum name
-    enum_index_type : *Type_Info;
+    enum_index_type:    *Type_Info;
 }
 
 IO_Data_Lookup: Table(*Type_Info, IO_Data);

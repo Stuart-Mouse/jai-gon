@@ -4,9 +4,9 @@ reserved_chars   :: "~!@#$%^&*{}[]\"";
 whitespace_and_reserved_chars :: " ,\t\r\n#{}[]\"\0";
 
 Token :: struct {
-    type    : Token_Type;
-    text    : string;
-    src_loc : Source_Location;
+    type:       Token_Type;
+    text:       string;
+    src_loc:    Source_Location;
 }
 
 Token_Type :: enum u8 {
@@ -31,9 +31,9 @@ Source_Location :: struct {
 }
 
 Tokenizer :: struct {
-    file            : string;
-    next_token      : Token;
-    cursor_location : Source_Location;
+    file:               string;
+    next_token:         Token;
+    cursor_location:    Source_Location;
 }
 
 init_tokenizer :: (using t: *Tokenizer) {
@@ -121,13 +121,11 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         quote_char := file[0];
         
         if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
-        string_value: string = ---;
-        string_value.data  = file.data;
-        string_value.count = 0;
+        string_value := string.{ 0, file.data };
         
         while file[0] != quote_char {
             // TODO: handle escape sequences more properly
-            adv := 1 + cast(int) (file[0] == #char "\\"); 
+            adv := 1 + (file[0] == #char "\\").(int); 
             string_value.count += adv;
             if !advance(t, adv)  
                 return make_error_token("Unexpected EOF while parsing string.");
@@ -139,9 +137,7 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
     
     // unquoted string
     if is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-        string_value: string = ---;
-        string_value.data = file.data;
-        string_value.count = 0;
+        string_value := string.{ 0, file.data };
         
         while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
             string_value.count += 1;
