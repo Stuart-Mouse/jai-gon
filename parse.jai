@@ -225,12 +225,12 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
                     
                     // COME BACK HERE (LATER: AND DO WHAT?)
                     ref_ti     := node.ref.node.data_binding.type;
-                    binding_ti := (cast(*Type_Info_Pointer) *node.data_binding.type).pointer_to;
+                    binding_ti := node.data_binding.type.(*Type_Info_Pointer).pointer_to;
                     if ref_ti != binding_ti {
                         log("pointer type mismatch % vs %", ref_ti, binding_ti);
                         return false;
                     }
-                    (cast(**void) node.data_binding.value_pointer).* = node.ref.node.data_binding.value_pointer;
+                    node.data_binding.value_pointer.(**void).* = node.ref.node.data_binding.value_pointer;
                     return true;
                     
                 case;
@@ -398,7 +398,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                             then node.flags |= .DONT_ASSIGN_NAME;
                         
                         member_any := Any.{
-                            value_pointer = cast(*u8) node.data_binding.value_pointer + member.offset_in_bytes,
+                            value_pointer = node.data_binding.value_pointer + member.offset_in_bytes,
                             type          = member.type,
                         };
                         add_data_binding_to_node(child, member_any);
@@ -413,7 +413,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     if !(node.flags & .DONT_ASSIGN_NAME) {
                         if io_data && io_data.name_member {
                             member_any := Any.{
-                                value_pointer = cast(*u8) node.data_binding.value_pointer + io_data.name_member.offset_in_bytes,
+                                value_pointer = node.data_binding.value_pointer + io_data.name_member.offset_in_bytes,
                                 type          = io_data.name_member.type,
                             };
                             if !set_value_from_string(member_any, node.name) {
@@ -423,7 +423,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                     
                 case .ARRAY;
-                    ti_array := cast(*Type_Info_Array) node.data_binding.type;
+                    ti_array := node.data_binding.type.(*Type_Info_Array);
                     
                     io_data  := table_find_pointer(*IO_Data_Lookup, ti_array.element_type);
                     if io_data && (.ARRAY_INDEXED & io_data.parse.flags)
@@ -432,7 +432,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         then node.flags |= .ARRAY_AS_OBJECT;
                                 
                     if ti_array.array_type == .RESIZABLE {
-                        raw_array := cast(*Resizable_Array) node.data_binding.value_pointer;
+                        raw_array := node.data_binding.value_pointer.(*Resizable_Array);
 
                         if .ARRAY_INDEXED & node.flags {
                             for child: node.children {
@@ -446,7 +446,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                             raw_array.count += node.count;
                             for node.children {
                                 elem_any := Any.{
-                                    value_pointer = cast(*u8) raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
+                                    value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
                                     type          = ti_array.element_type
                                 };
                                 add_data_binding_to_node(it, elem_any);
@@ -455,17 +455,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     } else { // .ARRAY and .VIEW
                         io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
 
-                        data       : *void = ---;
-                        elem_count : int   = ---;
-                                
-                        if ti_array.array_type == .VIEW {
-                            raw_array := cast(*Resizable_Array) node.data_binding.value_pointer;
-                            data       = raw_array.data;
-                            elem_count = raw_array.count;
-                        } else {
-                            data       = node.data_binding.value_pointer;
-                            elem_count = ti_array.array_count;
-                        }
+                        elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
                         
                         if io_data && (.ARRAY_INDEXED & io_data.parse.flags) {
                             node.flags |= .ARRAY_INDEXED;
@@ -477,7 +467,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                                 }
                                 
                                 elem_any := Any.{
-                                    value_pointer = cast(*u8) data + (ti_array.element_type.runtime_size * elem_index),
+                                    value_pointer = data + (ti_array.element_type.runtime_size * elem_index),
                                     type          = ti_array.element_type,
                                 };
                                 add_data_binding_to_node(child, elem_any);
@@ -498,7 +488,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                             
                             for child: node.children {
                                 elem_any := Any.{
-                                    value_pointer = cast(*u8) data + (ti_array.element_type.runtime_size * it_index),
+                                    value_pointer = data + (ti_array.element_type.runtime_size * it_index),
                                     type          = ti_array.element_type,
                                 };
                                 add_data_binding_to_node(child, elem_any);
@@ -522,8 +512,9 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
         case .ARRAY;
             if binding.type.type == {
                 case .ENUM;
-                    ti_enum := cast(*Type_Info_Enum) node.data_binding.type;
+                    ti_enum := node.data_binding.type.(*Type_Info_Enum);
                     if !(ti_enum.enum_type_flags & .FLAGS) {
+                        log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
                         return false;
                     }
                     if node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
@@ -534,7 +525,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 
                 case .STRUCT;
-                    ti_struct := cast(*Type_Info_Struct) node.data_binding.type;
+                    ti_struct := node.data_binding.type.(*Type_Info_Struct);
 
                     if node.count > ti_struct.members.count {
                         log("Data binding error: array-type struct contains too many elements.");
@@ -544,17 +535,17 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         // TODO: will need to to more work here because of constant struct members
                         member := ti_struct.members[it_index];
                         member_any := Any.{
-                            value_pointer = cast(*u8) node.data_binding.value_pointer + member.offset_in_bytes,
+                            value_pointer = node.data_binding.value_pointer + member.offset_in_bytes,
                             type          = member.type,
                         };
                         add_data_binding_to_node(child, member_any);
                     }
                     
                 case .ARRAY;
-                    ti_array := cast(*Type_Info_Array) node.data_binding.type;
+                    ti_array := node.data_binding.type.(*Type_Info_Array);
                     
                     if ti_array.array_type == .RESIZABLE {
-                        raw_array := cast(*Resizable_Array) node.data_binding.value_pointer;
+                        raw_array := node.data_binding.value_pointer.(*Resizable_Array);
                         /*
                             IMPORTANT NOTE: 
                             
@@ -565,7 +556,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                             This may prove to be more fragile aspects of the DOM parser in contrast to the SAX implementation.
                             Because this definitely seems like something that a user could break through a problematic callback procedure.
                             
-                            We could potentially fix this by chaning how we store data bindings.
+                            We could potentially fix this by changing how we store data bindings.
                             For array elements, instead of storing a pointer to data, store a pointer to a the base pointer and also element offset.
                             We could have a node flag to indicate that we should use this scheme instead of the usual one.
                             We won't do this unless we need to though. For now, the current method is fine.
@@ -575,24 +566,13 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         raw_array.count += node.count;
                         for node.children {
                             elem_any := Any.{
-                                value_pointer = cast(*u8) raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
+                                value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
                                 type          = ti_array.element_type
                             };
                             add_data_binding_to_node(it, elem_any);
                         }
                     } else {
-                        data       : *void = ---;
-                        elem_count : int   = ---;
-                                
-                        if ti_array.array_type == .VIEW {
-                            raw_array := cast(*Resizable_Array) node.data_binding.value_pointer;
-                            data       = raw_array.data;
-                            elem_count = raw_array.count;
-                        } else {
-                            data       = node.data_binding.value_pointer;
-                            elem_count = ti_array.array_count;
-                        }
-                        
+                        elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
                         if node.count > elem_count {
                             log("Data binding error: bounds check failed on array or slice.");
                             return false;
@@ -600,7 +580,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         
                         for child: node.children {
                             elem_any := Any.{
-                                value_pointer = cast(*u8) data + (ti_array.element_type.runtime_size * it_index),
+                                value_pointer = data + (ti_array.element_type.runtime_size * it_index),
                                 type          = ti_array.element_type,
                             };
                             add_data_binding_to_node(child, elem_any);
@@ -608,7 +588,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                     
                 case;
-                    log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
+                    log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
                     return false;
             }
 
@@ -621,20 +601,20 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 case .ENUM;
                     // For enum flags, both the enclosing array and the individual elements have the same binding
                     // For fields, we must verify that the parent binding is the same as the field binding
-                    ti_enum := cast(*Type_Info_Enum) node.data_binding.type;
+                    ti_enum := node.data_binding.type.(*Type_Info_Enum);
                     if (ti_enum.enum_type_flags & .FLAGS) 
                     && node.parent.data_binding.value_pointer != node.data_binding.value_pointer
                         return false;
                 
                 case .ARRAY; 
                     // Arrays of bytes/u8 are permitted as single-valued fields so that we can parse them as strings
-                    if (cast(*Type_Info_Array)node.data_binding.type).element_type.runtime_size != 1  
+                    if node.data_binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
                         return false;
                 
                 // TODO: permit structs which have custom parsing procedures defined
                 
                 case;
-                    log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
+                    log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
                     return false;
             }
 

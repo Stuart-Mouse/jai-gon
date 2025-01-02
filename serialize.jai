@@ -98,7 +98,7 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
     if node.parent != null {
         in_array       = node.parent.type == .ARRAY;
         is_first_child = node == node.parent.first;
-        same_line      = cast(bool) (.SAME_LINE & node.parent.flags);      // check for sameline on parent, not self (we do that later)
+        same_line      = (.SAME_LINE & node.parent.flags).(bool);      // check for sameline on parent, not self (we do that later)
     }
     
     if (same_line || in_array) && !is_first_child 
@@ -125,7 +125,7 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
         case .OBJECT; #through;
         case .ARRAY;
             // ensure that end of object/array gets printed on same line if sameline flag is set on self
-            same_line ||= cast(bool) (.SAME_LINE & node.flags);
+            same_line ||= (.SAME_LINE & node.flags).(bool);
             
             is_array := (node.type == .ARRAY);
             if is_array && node.first && do_sameline_for_type(node.first.data_binding.type) {
@@ -248,7 +248,7 @@ determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
             return .FIELD;
         
         case .ENUM;
-            ti_enum := cast(*Type_Info_Enum) node.data_binding.type;
+            ti_enum := node.data_binding.type.(*Type_Info_Enum);
             if !(ti_enum.enum_type_flags & .FLAGS) {
                 return .FIELD;
             }
@@ -262,7 +262,7 @@ determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
         // arrays of bytes/u8 are serialized as string
         // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
         case .ARRAY;
-            ti_array := cast(*Type_Info_Array) node.data_binding.type;
+            ti_array := node.data_binding.type.(*Type_Info_Array);
             if ti_array.element_type.runtime_size == 1 {
                 return .FIELD;
             }
@@ -294,11 +294,11 @@ append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
 
     if node.data_binding.type.type == {
         case .STRUCT;
-            ti_struct := cast(*Type_Info_Struct) node.data_binding.type;
+            ti_struct := node.data_binding.type.(*Type_Info_Struct);
             
             for ti_struct.members {
                 member_any := Any.{
-                    value_pointer = cast(*u8) node.data_binding.value_pointer + it.offset_in_bytes,
+                    value_pointer = node.data_binding.value_pointer + it.offset_in_bytes,
                     type          = it.type,
                 };
                 // figure out whether to prepend elems (will do for things that need to be attrs)
@@ -308,7 +308,7 @@ append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
             return;
             
         case .ARRAY;
-            ti_array := cast(*Type_Info_Array) node.data_binding.type;
+            ti_array := node.data_binding.type.(*Type_Info_Array);
         
             data       : *void = ---;
             elem_count : int   = ---;
@@ -317,7 +317,7 @@ append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
                 data       = node.data_binding.value_pointer;
                 elem_count = ti_array.array_count;
             } else {
-                raw_array := cast(*Resizable_Array) node.data_binding.value_pointer;
+                raw_array := node.data_binding.value_pointer.(*Resizable_Array);
                 data       = raw_array.data;
                 elem_count = raw_array.count;
                 if elem_count == 0  return; // skip serializing empty dynamic arrays
@@ -327,7 +327,7 @@ append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
 
             for 0..elem_count-1 {
                 elem_any := Any.{
-                    value_pointer = cast(*u8) data + (ti_array.element_type.runtime_size * it),
+                    value_pointer = data + (ti_array.element_type.runtime_size * it),
                     type          = ti_array.element_type
                 };
                 
@@ -355,22 +355,22 @@ is_escaped_char :: (char: u8) -> bool {
 
 to_conformant_string :: (s: string, force_quotes := false) -> string {
     if s == ""  return copy_string("\"\"");
-
+    
     sb: String_Builder;
-  
+    
     write_quotes := force_quotes || (s.count == 0) || find_index_of_any_from_left(s, whitespace_and_reserved_chars) >= 0;
     
     if write_quotes  append(*sb, "\"");
-  
-    for c: cast([]u8)s {
+    
+    for c: s {
         if c == 0  break;
         if is_escaped_char(c) {
             append(*sb, "\\");
         }
         append(*sb, c);
     }
-  
+    
     if write_quotes  append(*sb, "\"");
-  
+    
     return builder_to_string(*sb);
 }

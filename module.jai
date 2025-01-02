@@ -29,18 +29,16 @@ set_value_from_string :: (any: Any, text: string) -> bool {
   
     if any.type.type == {
         case .INTEGER;
-            result  : int;
-            success : bool;
-            result, success = string_to_int(text);
+            result, success := string_to_int(text);
             if !success return false;
-        
-            ti_integer := cast(*Type_Info_Integer)any.type;
+            
+            ti_integer := any.type.(*Type_Info_Integer);
             if ti_integer.signed {
                 valid, low, high := range_check_and_store(result, ti_integer, any.value_pointer);
                 // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
                 if !valid return false;
             } else {
-                valid, low, high := range_check_and_store(cast(u64) result, ti_integer, any.value_pointer);
+                valid, low, high := range_check_and_store(result.(u64), ti_integer, any.value_pointer);
                 // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
                 if !valid return false;
             }  
@@ -51,29 +49,29 @@ set_value_from_string :: (any: Any, text: string) -> bool {
             if any.type.runtime_size == 4 {
                 val, ok, text := string_to_float(text);
                 if !ok return false;
-                (cast(*float)any.value_pointer).* = val;
+                any.value_pointer.(*float).* = val;
             }
             else if any.type.runtime_size == 8 {
                 val, ok, text := string_to_float64(text);
                 if !ok return false;
-                (cast(*float64)any.value_pointer).* = val;
+                any.value_pointer.(*float64).* = val;
             }
             else return false;  
   
         case .BOOL;
             b := (to_upper(text[0]) == #char "T");
             if any.type.runtime_size == 1 { 
-                (cast(*bool)any.value_pointer).* = b; 
+                any.value_pointer.(*bool).* = b; 
             }
             else return false;
             
         case .STRING;
             // TODO: add conditional logic to NOT copy string if desired
-            (cast(*string)any.value_pointer).* = text;  
-            // (cast(*string)any.value_pointer).* = copy_string(text);  
+            any.value_pointer.(*string).* = text;  
+            // any.value_pointer.(*string).* = copy_string(text);  
   
         case .ENUM;
-            enum_type := cast(*Type_Info_Enum)any.type;  
+            enum_type := any.type.(*Type_Info_Enum);  
   
             // TODO: May add this back in later...
             // First, try to parse it as an integer.
@@ -88,10 +86,10 @@ set_value_from_string :: (any: Any, text: string) -> bool {
                     for enum_type.names {
                         if it == text {
                             if enum_type.runtime_size == {
-                                case 1; (cast(*s8 )any.value_pointer).* |= xx enum_type.values[it_index]; 
-                                case 2; (cast(*s16)any.value_pointer).* |= xx enum_type.values[it_index]; 
-                                case 4; (cast(*s32)any.value_pointer).* |= xx enum_type.values[it_index]; 
-                                case 8; (cast(*s64)any.value_pointer).* |= xx enum_type.values[it_index]; 
+                                case 1; any.value_pointer.(*s8 ).* |= xx enum_type.values[it_index]; 
+                                case 2; any.value_pointer.(*s16).* |= xx enum_type.values[it_index]; 
+                                case 4; any.value_pointer.(*s32).* |= xx enum_type.values[it_index]; 
+                                case 8; any.value_pointer.(*s64).* |= xx enum_type.values[it_index]; 
                             }
                             return true;
                         }
@@ -101,10 +99,10 @@ set_value_from_string :: (any: Any, text: string) -> bool {
                     for enum_type.names {
                         if it == text {
                             if enum_type.runtime_size == {
-                                case 1; (cast(*s8 )any.value_pointer).* = xx enum_type.values[it_index]; 
-                                case 2; (cast(*s16)any.value_pointer).* = xx enum_type.values[it_index]; 
-                                case 4; (cast(*s32)any.value_pointer).* = xx enum_type.values[it_index]; 
-                                case 8; (cast(*s64)any.value_pointer).* = xx enum_type.values[it_index]; 
+                                case 1; any.value_pointer.(*s8 ).* = xx enum_type.values[it_index]; 
+                                case 2; any.value_pointer.(*s16).* = xx enum_type.values[it_index]; 
+                                case 4; any.value_pointer.(*s32).* = xx enum_type.values[it_index]; 
+                                case 8; any.value_pointer.(*s64).* = xx enum_type.values[it_index]; 
                             }
                             return true;
                         }
@@ -129,7 +127,7 @@ array_add_any :: inline (array: Any) -> Any, bool {
         print("Array any is not an array!\n");
         return Any.{}, false;
     }
-    ti_array := cast(*Type_Info_Array) array.type;
+    ti_array := array.type.(*Type_Info_Array);
     
     any := array_add_any_nocheck(xx array.value_pointer, ti_array.element_type);
     return any, true;
@@ -145,7 +143,7 @@ array_add_any_nocheck :: (array: *Resizable_Array, elem_type: *Type_Info) -> Any
     }
     
     ret := Any.{
-        value_pointer = cast(*u8) array.data + (array.count * elem_type.runtime_size),
+        value_pointer = array.data + (array.count * elem_type.runtime_size),
         type          = elem_type,
     };
     array.count += 1;
@@ -174,8 +172,8 @@ array_add_any_at_index :: (array_any: Any, index: int) -> Any {
     if array_any.value_pointer == null || array_any.type.type != .ARRAY 
         then return false;
     
-    ti_array  := cast(*Type_Info_Array) array_any.type;
-    raw_array := cast(*Resizable_Array) array_any.value_pointer;
+    ti_array  := array_any.type.(*Type_Info_Array);
+    raw_array := array_any.value_pointer.(*Resizable_Array);
     new_cap   := max(next_power_of_two(index + 1), 8);
     
     array_reserve_nonpoly(xx raw_array, new_cap, ti_array.element_type.runtime_size);
@@ -183,26 +181,10 @@ array_add_any_at_index :: (array_any: Any, index: int) -> Any {
     raw_array.count = max(raw_array.count, index + 1);
     
     return Any.{
-        value_pointer = cast(*u8) raw_array.data + (index * ti_array.element_type.runtime_size),
+        value_pointer = raw_array.data + (index * ti_array.element_type.runtime_size),
         type          = ti_array.element_type, 
     };
 }
-
-// second return value indicates that the any value was actually a pointer
-// deref_any_pointer :: (value: any) -> (any, bool) {
-//     ti := runtime.type_info_base(type_info_of(value.id))
-//     ti_pointer, ok := ti.variant.(runtime.Type_Info_Pointer)
-//     if ok {
-//         ret := any {
-//             id   = ti_pointer.elem.id,
-//             data = (cast(*rawptr)value.data)*,
-//         }
-//         return ret, true
-//     }
-    
-//     // if the type is not a pointer, just return the original value
-//     return value, false
-// }
 
 // convert between any types whose underlying value is essentially an integer, using s64 as intermediate value
 // tbh, maybe we should just skip the s64 intermediate and replace with a simple memcpy (actually, memset the dst to zero then memcpy src to dst sizeof whichever is smaller)
@@ -229,19 +211,17 @@ dynamic_int_cast :: (dst: Any, src: Any, enforce_size: bool = false) -> bool {
     s64_value: s64;
   
     if src.type.runtime_size == {
-        case  1; s64_value = xx (cast(*s8  )src.value_pointer).*;
-        case  2; s64_value = xx (cast(*s16 )src.value_pointer).*;
-        case  4; s64_value = xx (cast(*s32 )src.value_pointer).*;
-        case  8; s64_value = xx (cast(*s64 )src.value_pointer).*;
-        // case 16; s64_value = xx (cast(*i128)src.data).*;
+        case 1; s64_value = src.value_pointer.(*s8 ).*.(s64);
+        case 2; s64_value = src.value_pointer.(*s16).*.(s64);
+        case 4; s64_value = src.value_pointer.(*s32).*.(s64);
+        case 8; s64_value = src.value_pointer.(*s64).*.(s64);
     }
   
     if dst.type.runtime_size == {
-        case  1; (cast(*s8  )dst.value_pointer).* = xx s64_value;
-        case  2; (cast(*s16 )dst.value_pointer).* = xx s64_value;
-        case  4; (cast(*s32 )dst.value_pointer).* = xx s64_value;
-        case  8; (cast(*s64 )dst.value_pointer).* = xx s64_value;
-        // case 16; (cast(*i128)dst.data).* = xx s64_value;
+        case 1; dst.value_pointer.(*s8 ).* = s64_value.(s8 );
+        case 2; dst.value_pointer.(*s16).* = s64_value.(s16);
+        case 4; dst.value_pointer.(*s32).* = s64_value.(s32);
+        case 8; dst.value_pointer.(*s64).* = s64_value.(s64);
     }
   
     return true;
@@ -255,26 +235,23 @@ dynamic_float_cast :: (dst: Any, src: Any) -> bool {
     if src.type.type == {
         case .FLOAT;
             if src.type.runtime_size == {
-                // case 2; f64_value = xx (cast(*f16)src.value_pointer).*;
-                case 4; f64_value = xx (cast(*float32)src.value_pointer).*;
-                case 8; f64_value = xx (cast(*float64)src.value_pointer).*;
+                case 4; f64_value = src.value_pointer.(*float32).*.(float64);
+                case 8; f64_value = src.value_pointer.(*float64).*;
             }
         case .INTEGER;
             if src.type.runtime_size == {
-                case  1; f64_value = xx (cast(*s8  )src.value_pointer).*;
-                case  2; f64_value = xx (cast(*s16 )src.value_pointer).*;
-                case  4; f64_value = xx (cast(*s32 )src.value_pointer).*;
-                case  8; f64_value = xx (cast(*s64 )src.value_pointer).*;
-                // case 16; f64_value = xx (cast(*s128)src.value_pointer).*;
+                case 1; f64_value = src.value_pointer.(*s8 ).*.(float64);
+                case 2; f64_value = src.value_pointer.(*s16).*.(float64);
+                case 4; f64_value = src.value_pointer.(*s32).*.(float64);
+                case 8; f64_value = src.value_pointer.(*s64).*.(float64);
             }
         case;
             return false;
     }
     
     if dst.type.runtime_size == {
-        // case 2; (cast(*f16)dst.data).* = xx f64_value;
-        case 4; (cast(*float32)dst.value_pointer).* = xx f64_value;
-        case 8; (cast(*float64)dst.value_pointer).* = xx f64_value;
+        case 4; dst.value_pointer.(*float32).* = f64_value.(float32);
+        case 8; dst.value_pointer.(*float64).* = f64_value;
     }
     
     return true;

@@ -36,22 +36,21 @@ Node_Type :: enum {
 // this struct is kinda big
 // maybe we optimize this later, but for now just making it work
 DOM_Node :: struct {
-    parent       : *DOM_Node;
-    next         : *DOM_Node;
-    prev         : *DOM_Node;
+    parent, next, prev: *DOM_Node;
     
     // src_loc      : Source_Location;
     
-    name         : string;
-    type         : Node_Type;
-    flags        : DOM_Node_Flags;
-    data_binding : Any;
+    name:  string;
+    type:  Node_Type;
+    flags: DOM_Node_Flags;
+    
+    data_binding: Any;
     
     using content: union {
         ref: struct {
-            text : string;
-            node : *DOM_Node;
-            type : DOM_Node_Ref_Type;
+            text: string;
+            node: *DOM_Node;
+            type: DOM_Node_Ref_Type;
         };
         
         value: string;
@@ -67,15 +66,16 @@ DOM_Node_List :: struct {
 };
 
 for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {
-    `it_index := 0;
     #if flags & .REVERSE {
+        `it_index := list.count;
         `it := list.last;
         while it {
             prev := it.prev;
-            defer { it = prev; it_index += 1; }
+            defer { it = prev; it_index -= 1; }
             #insert(remove={remove_node(it);}) body;
         }
     } else {
+        `it_index := 0;
         `it := list.first;
         while it {
             next := it.next;
