@@ -308,16 +308,16 @@ get_next_token_from_path_string :: (t: *Tokenizer) -> Token {
 }
 
 format_node_path :: (node: *DOM_Node) -> string {
-    recurse :: (builder: *String_Builder, node: *DOM_Node) {
-        if node.parent != null {
-            recurse(builder, node.parent);
-            append(builder, "/");
-        }
-        append(builder, node.name);
-    }
-    
     builder: String_Builder;
     init_string_builder(*builder);
-    recurse(*builder, node);
+    append_node_path_to_string_builder(*builder, node);
     return builder_to_string(*builder);
+}
+
+append_node_path_to_string_builder :: (builder: *String_Builder, node: *DOM_Node) {
+    if node.parent != null {
+        append_node_path_to_string_builder(builder, node.parent);
+        append(builder, "/");
+    }
+    append(builder, node.name);
 }

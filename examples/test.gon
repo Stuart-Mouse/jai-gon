@@ -17,3 +17,5 @@ things {
 }
 
 flags [ first, third ]
+
+unresolvable &"things/'Thing 5'"

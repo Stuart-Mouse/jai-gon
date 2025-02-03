@@ -5,6 +5,5 @@ build/
 *.raddbgi
 *.rdi
 
-notes.md
 examples/test.jai
 examples/.build

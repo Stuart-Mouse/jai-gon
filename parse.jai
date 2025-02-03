@@ -61,10 +61,135 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
     return true;
 }
 
+
+// validate_node_references :: (using parser: *Parser) -> bool {
+//     // As we recurse to validate node references, we need to check that we don't have any dependency cycles.
+//     // Each time we jump to a referenced node, tag the current node as 'dependent' in the Node_And_Dependent struct below.
+//     // This will create a dependency chain that we can walk backwards in order to check for dependency cycles.
+//     Node_And_Dependent :: struct { node: *DOM_Node; dependent: *Node_And_Dependent; };
+    
+//     recurse :: (using parser: *Parser, using node_and_dependent: Node_And_Dependent) -> bool {
+//         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
+        
+//         // check for dependency cycles
+//         {
+//             d := dependent;
+//             while d {
+//                 if node == d.node {
+//                     sb: String_Builder;
+//                     append(*sb, "Circular dependency detected: \n")
+//                     d := dependent;
+//                     while d {
+//                         append_node_path_to_string_builder(d.node)
+//                         d = d.dependent;
+//                     }
+//                     log(builder_to_string(*sb));
+//                     return false;
+//                 }
+//                 d = d.dependent;
+//             }
+//         }
+        
+//         if node.type == {
+//             case .FIELD;
+//                 node.flags |= .REFERENCES_RESOLVED;
+//                 return .PROGRESS | .COMPLETE;
+        
+//             case .OBJECT; #through;
+//             case .ARRAY;
+//                     result: Result = .COMPLETE;
+//                     for child: node.children {
+//                         child_result := recurse(parser, .{ child, dependent });
+//                         if .ERROR       & child_result  return .ERROR;
+//                         if .REMOVE_NODE & child_result  remove;
+//                         result |=  child_result & .PROGRESS;
+//                         result &= (child_result & .COMPLETE) | ~.COMPLETE;
+//                     }
+//                     if .COMPLETE & result {
+//                         node.flags |= .REFERENCES_RESOLVED;
+//                     }
+//                     return result;
+                
+//             case .REF;
+//                 path := node.ref.text;
+//                 if path == "" {
+//                     log("Empty reference on node '%'.", format_node_path(node));
+//                     return .ERROR;
+//                 }
+                
+//                 // NOTE: this could be very problematic, since it's possible that the path we need to find just doesn't exist yet,
+//                 //       but, maybe it will exist later once some nodes have been copied and pasted elsewhere...
+//                 search_from_node := node.parent;
+//                 if path[0] == #char "/" {
+//                     advance(*path);
+//                     search_from_node = parser.dom_root;
+//                 }
+//                 ref_node := find_node_by_path(search_from_node, path);
+                
+//                 if ref_node == null {
+//                     // TODO: find a way to print failed node path only when full pass makes no progress
+//                     // maybe we collect warnings in some array and only print on error
+//                     // would want to enumerate error types and store node, then format and print later
+//                     log("WARNING: Cannot resolve ref from % to %", format_node_path(node), node.ref.text);
+//                     return .NONE;
+//                 }
+//                 node.ref.node = ref_node;
+                
+//                 // pointer and index refs can be passed along and handled later
+//                 if node.ref.type != .VALUE { 
+//                     node.flags |= .REFERENCES_RESOLVED;
+//                     return .PROGRESS | .COMPLETE;
+//                 }
+                
+//                 // value ref to value ref cannot be resolved yet
+//                 if node.ref.node.type == .REF && node.ref.node.ref.type == .VALUE {
+//                     log("WARNING: Cannot resolve value ref to value ref: %", format_node_path(node));
+//                     return .NONE;
+//                 }
+                
+//                 result: Result = .PROGRESS | .COMPLETE;
+                
+//                 if .BIND_PARENT & node.flags {
+//                     assert(ref_node.type == .OBJECT, "ref node with bind parent flag was not pointing to an object.");
+                
+//                     // we can't copy these nodes until they are all resolved, otherwise we get issues
+//                     if !(.REFERENCES_RESOLVED & ref_node.flags) {
+//                         return .NONE;
+//                     }
+                    
+//                     parent := node.parent;
+//                     for child: ref_node.children {
+//                         dst := find_child_node_by_name(parent, child.name);
+//                         if dst != null  continue;
+//                         dst = append_child_node(parent);
+//                         if !clone_node_recursive(dst, child,, node_allocator)  return .ERROR;
+//                     }
+//                     result |= .REMOVE_NODE;
+//                 }
+//                 else {
+//                     name := node.name;
+//                     if !clone_node_recursive(node, ref_node,, node_allocator)  return .ERROR;
+//                     node.name = name;
+//                 }
+                
+//                 node.flags |= .REFERENCES_RESOLVED;
+//                 return result;
+                
+//             case .INVALID;
+//                 log("Invalid node type in validate_node_references().");
+//                 return .ERROR;
+//         }
+        
+//         return .ERROR;
+//     }
+    
+//     return recurse(parser, .{ parser.dom_root, null });
+// }
+
 validate_node_references :: (using parser: *Parser) -> bool {
     Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
-
-    recurse :: (using parser: *Parser, node: *DOM_Node) -> Result {
+    
+    recurse :: (using parser: *Parser, node: *DOM_Node, unresolved_refs: *[..] *DOM_Node) -> Result {
         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
         
         if node.type == {
@@ -76,7 +201,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
             case .ARRAY;
                     result: Result = .COMPLETE;
                     for child: node.children {
-                        child_result := recurse(parser, child);
+                        child_result := recurse(parser, child, unresolved_refs);
                         if .ERROR       & child_result  return .ERROR;
                         if .REMOVE_NODE & child_result  remove;
                         result |=  child_result & .PROGRESS;
@@ -102,10 +227,8 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 ref_node := find_node_by_path(search_from_node, path);
                 
                 if ref_node == null {
-                    // TODO: find a way to print failed node path only when full pass makes no progress
-                    // maybe we collect warnings in some array and only print on error
-                    // would want to enumerate error types and store node, then format and print later
-                    log("WARNING: Cannot resolve ref from % to %", format_node_path(node), node.ref.text);
+                    // We just hold onto this until later, then if we really fail to resolve references, we print all nodes with unresolved refs at once.
+                    array_add_if_unique(unresolved_refs, node);
                     return .NONE;
                 }
                 node.ref.node = ref_node;
@@ -118,7 +241,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 
                 // value ref to value ref cannot be resolved yet
                 if node.ref.node.type == .REF && node.ref.node.ref.type == .VALUE {
-                    log("WARNING: Cannot resolve value ref to value ref: %", format_node_path(node));
+                    array_add_if_unique(unresolved_refs, node);
                     return .NONE;
                 }
                 
@@ -158,12 +281,15 @@ validate_node_references :: (using parser: *Parser) -> bool {
         return .ERROR;
     }
     
+    unresolved_refs: [..] *DOM_Node;
+    defer array_free(unresolved_refs);
+    
     iterations := 0;
     while true {
         iterations += 1;
         result: Result = .COMPLETE;
         for child: parser.dom_root.children {
-            child_result := recurse(parser, child);
+            child_result := recurse(parser, child, *unresolved_refs);
             if child_result & .ERROR {
                 log("Error while trying to resolve node references.");
                 return false;
@@ -176,7 +302,11 @@ validate_node_references :: (using parser: *Parser) -> bool {
         }
         if   .COMPLETE & result  break;
         if !(.PROGRESS & result) {
-            log("Unable to resolve node references.");
+            log("Unable to resolve node references:");
+            for unresolved_refs {
+                if .REFERENCES_RESOLVED & it.flags  continue;
+                log("\t% -> %", format_node_path(it), it.ref.text);
+            }
             return false;
         }
     }
