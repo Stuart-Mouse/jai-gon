@@ -13,6 +13,11 @@ Parser :: struct {
     node_pool:          Flat_Pool; 
     node_allocator:     Allocator;
     callbacks:          [..] Parser_Callback;
+    
+    #if USING_LEAD_SHEETS {
+        prev_assignment:  *LS.Node;   // TODO: maybe move idk yets
+        script:         LS.Script;
+    }
 };
 
 init_parser :: (using parser: *Parser, _file: string) {
@@ -58,6 +63,68 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
     for bindings
         if !add_data_binding_to_dom(parser, it.binding, it.path)  
             then return false;
+    return true;
+}
+
+
+generate_script :: (parser: *Parser) -> bool {
+    generate_statements :: (using parser: *Parser, node: *DOM_Node) -> bool {
+        if node.type == {
+            case .OBJECT; #through;
+            case .ARRAY;
+                for node.children  if !generate_statements(parser, it)  return false;
+                
+            case .CODE;
+                left := LS.alloc_node(*parser.script, LS.Node_Literal);
+                left.literal_type = .ANY;
+                left.any = node.data_binding;
+                
+                assignment := LS.alloc_node(*parser.script, LS.Node_Operation);
+                assignment.name = "=";
+                assignment.operator_type = .ASSIGNMENT;
+                assignment.flags |= .MUST_BE_STATEMENT_ROOT;
+                assignment.left = left;
+                
+                // we have to reinit lexer for every expression
+                // TODO: set the lexer source location based on dom node?
+                LS.init_lexer(*script.lexer, node.code.text);
+                assignment.right = LS.parse_expression(*parser.script, 0);
+                if assignment.right == null {
+                    log("Error: unable to parse expression '%'.", node.code.text);
+                    return false;
+                }
+                
+                if prev_assignment == null {
+                    parser.script.ast_root.statements = assignment;
+                } else {
+                    prev_assignment.next = assignment;
+                }
+                prev_assignment = assignment;
+                node.code.statement = assignment;
+                
+            case .INVALID;
+                log("Invalid node type in generate_script().");
+                return true;
+        }
+        
+        return true;
+    }
+    
+    LS.init_script(*parser.script);
+    parser.script.ast_root = LS.alloc_node(*parser.script, LS.Node_Block);
+    parser.script.current_parent_node = parser.script.ast_root;
+    
+    if !generate_statements(parser, parser.dom_root)  return false;
+    parser.script.flags |= .PARSED;
+    
+    // TODO: iterate over all nodes, manually resolve identifiers
+    
+    
+    if !LS.typecheck_script(*parser.script) {
+        log("Error: failed to typecheck script.\n");
+        return false;
+    }
+    
     return true;
 }
 
@@ -186,6 +253,18 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
 //     return recurse(parser, .{ parser.dom_root, null });
 // }
 
+/*
+    NOTE: 
+    Node references are resolved iteratively is because the DOM may have new nodes added to it as value references are evaluated.
+    Were it not for value references, this would not be a concern and we could just resolve the references in a 'single pass', 
+        though we would then have to jump around the tree a bit more non-linearly when jumping to references.
+    It's really not a big deal on its own that this process is iterative rather thna recursive, but it has me thinking about the orthogonality of node references and code expressions (which I am now working on adding).
+    The index and pointer refs are still totally orthogonal to the code expressions, since they refer specifically to information about the structure of the DOM, not to the content of data bindings.
+    Value refs are still kind of orthogonal for objects, since they're structural as well and not strongly-typed.
+    But for simple fields, a value ref may as well just be an expression with just a path identifier e.g.: (`../things/stuff/item`)
+    
+    I need to just implement the script stuff and then worry more about the design... TBH
+*/
 validate_node_references :: (using parser: *Parser) -> bool {
     Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
     
@@ -193,6 +272,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
         
         if node.type == {
+            case .CODE; #through;
             case .FIELD;
                 node.flags |= .REFERENCES_RESOLVED;
                 return .PROGRESS | .COMPLETE;
@@ -316,7 +396,22 @@ validate_node_references :: (using parser: *Parser) -> bool {
 }
 
 process_data_bindings :: (using parser: *Parser) -> bool {
-    return process_node_binding(parser, dom_root);
+    #if USING_LEAD_SHEETS {
+        // TODO: figure out what to do about code nodes that don't have data bindings... 
+        //       will have to generate these cases as declarations instead of assignments?
+        //       or maybe we just allocate room for the result in the script pool and still use an anonymous lvalue literal
+        // NOTE: script cannot be generated until after data bindings are made, so we do this here instead of in parse_file_to_dom
+        if !generate_script(parser) return false;
+    }
+    
+    if !process_node_binding(parser, dom_root)  return false;
+    
+    #if USING_LEAD_SHEETS {
+        // code expressions get run after other data bindings are processed, and must be run in script order, not DOM-walking order
+        if !LS.execute_script(*parser.script)  return false;
+    }
+    
+    return true;
 }
 
 process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
@@ -333,6 +428,10 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
             for node.children
                 if !process_node_binding(parser, it)
                     return false;
+            return true;
+            
+        case .CODE;
+            // return LS.execute_node(node.code.statement);
             return true;
             
         case .FIELD;
@@ -367,15 +466,14 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
                     log("ERROR: got a ref of type % in process_node_binding.", node.ref.type);
                     return false;
             }
-            
     }
     
     return true;
 }
 
 construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
-    next_token : Token;
-    ok         : bool;
+    next_token: Token;
+    ok: bool;
     
     dom_root      = New(DOM_Node,, node_allocator);
     dom_root.name = "root";
@@ -461,6 +559,9 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             if next_token.type == {
                 case .STRING;
                     type = .FIELD;
+                    text = next_token.text;
+                case .CODE;
+                    type = .CODE;
                     text = next_token.text;
                 case .OBJECT_BEGIN;
                     type = .OBJECT;
@@ -767,6 +868,9 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     // all we can do here is check that the data binding is actually a pointer type
                     if binding.type.type != .POINTER  return false;
             }
+            
+        case .CODE; 
+            // TODO: we probably need extra validation stuff here
             
         case;
             // TODO: invalid node type error?

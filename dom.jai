@@ -31,6 +31,7 @@ Node_Type :: enum {
     OBJECT  :: 2;
     ARRAY   :: 3;
     REF     :: 4;
+    CODE    :: 5;
 }
 
 // this struct is kinda big
@@ -48,7 +49,7 @@ DOM_Node :: struct {
     
     using content: union {
         ref: struct {
-            text:   string;
+            text:   string;     // TODO: rename to 'path'
             node:   *DOM_Node;
             type:   DOM_Node_Ref_Type;
         };
@@ -56,6 +57,13 @@ DOM_Node :: struct {
         value: string;
         
         using children: DOM_Node_List;
+        
+        #if USING_LEAD_SHEETS {
+            code: struct {
+                text:       string;
+                statement:  *LS.Node;
+            }
+        }
     };
 }
 

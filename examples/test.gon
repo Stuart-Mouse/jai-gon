@@ -1,14 +1,14 @@
 
 things {
     "Thing 1" {
-        numbers [ 35, 7, 104, 3, 0 ]
-        fraction 35.35
-        text "this is a string"
+        numbers     [ 35, 7, 104, 3, 0 ]
+        fraction    35.35
+        text        "this is a string"
     }
     "Thing 2" {
-        numbers [ 35, 7, 105, 3, &"../../'Thing 3'" ]
-        fraction 35.35
-        text $"../'Thing 1'/text"
+        numbers     [ 35, 7, 105, 3, &"../../'Thing 3'" ]
+        fraction    (3 + 5)
+        text        $"../'Thing 1'/text"
     }
     "Thing 3" {
         $"../'Thing 1'"
@@ -18,4 +18,6 @@ things {
 
 flags [ first, third ]
 
-unresolvable &"things/'Thing 5'"
+# unresolvable &"things/'Thing 5'"
+
+

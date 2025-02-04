@@ -269,6 +269,12 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 #import "Hash_Table";
 #import "Flat_Pool";
 
+#module_parameters()(USING_LEAD_SHEETS := false);
+
+#if USING_LEAD_SHEETS {
+    LS :: #import "Lead_Sheets";
+}
+
 #load "dom.jai";
 #load "parse.jai";
 #load "serialize.jai";

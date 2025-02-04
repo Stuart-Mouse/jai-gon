@@ -167,6 +167,13 @@ assignment.right = parse_expression(script, 0);
 last_ast_node.next = assignment;
 ```
 
+step 1 may be just to make the make the expressions work
+    no ability to reference other fields yet
+    no order of evaluation concerns
+step 2 is implement the references by hijacking identifier resolution and inserting declarations as needed
+step 3 is fix the evaluation order by tracking dependencies between nodes
+
+
 ```
 resolve_gon_path_identifier :: (path: string, dependent: *DOM_Node) -> (data_binding: Any, ok: boolb) {
     // if there is no data binding, we should probably still be able to use the value on the node as whatever it is textually.

@@ -1,6 +1,6 @@
 
 whitespace_chars :: " ,\t\r\n\0";
-reserved_chars   :: "~!@#$%^&*{}[]\"";
+reserved_chars   :: "~!@#$%^&*{}[]()\"";
 whitespace_and_reserved_chars :: " ,\t\r\n#{}[]\"\0";
 
 Token :: struct {
@@ -24,6 +24,8 @@ Token_Type :: enum u8 {
     PATH_SPLIT;
     PATH_HERE;
     PATH_PARENT;
+    
+    CODE; // basically a string enclosed in ()
 }
 
 Source_Location :: struct {
@@ -83,13 +85,13 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
     
     // single character tokens
     if file[0] == {
-      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "", src_loc };
-      case #char "}";  advance(t);  return .{ .OBJECT_END,   "", src_loc };
-      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "", src_loc };
-      case #char "]";  advance(t);  return .{ .ARRAY_END,    "", src_loc };
-      case #char "&";  advance(t);  return .{ .REF_INDEX,    "", src_loc };
-      case #char "*";  advance(t);  return .{ .REF_POINTER,  "", src_loc };
-      case #char "$";  advance(t);  return .{ .REF_VALUE,    "", src_loc };
+      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "{", src_loc };
+      case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", src_loc };
+      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", src_loc };
+      case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", src_loc };
+      case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", src_loc };
+      case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", src_loc };
+      case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", src_loc };
     }
     
     // some helper procs
@@ -116,9 +118,18 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         }
     }
     
-    // string
-    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`"{ 
+    // string OR code
+    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" || file[0] == #char "("{ 
         quote_char := file[0];
+        
+        is_code := false;
+        if quote_char == #char "(" {
+            #if !USING_LEAD_SHEETS {
+                return make_error_token("Unable to parse code expression because Lead Sheets integration is not enabled as a module parameter.");
+            }
+            quote_char = #char ")";
+            is_code = true;
+        }
         
         if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
         string_value := string.{ 0, file.data };
@@ -127,11 +138,12 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
             // TODO: handle escape sequences more properly
             adv := 1 + (file[0] == #char "\\").(int); 
             string_value.count += adv;
-            if !advance(t, adv)  
-                return make_error_token("Unexpected EOF while parsing string.");
+            if !advance(t, adv)  return make_error_token("Unexpected EOF while parsing string.");
         }
         advance(t);
         
+        // inlcuding the () in the code string to fix LS parsing bug with unexpected EOF
+        if is_code  return .{ .CODE, string.{ string_value.count+2, string_value.data-1 }, src_loc };
         return .{ .STRING, string_value, src_loc };
     }
     
