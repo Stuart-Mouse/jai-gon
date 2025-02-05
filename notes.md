@@ -235,4 +235,44 @@ THINKING
 
 are we really sure that value refs are properly evaluated in an order-independent manner? 
     this is really pretty important, since it would be nonsensical to have the meaning of gon change based on the order of objects
+    I think that this is the case, because we dont' allow a value ref to a value ref to be resolved
     
+
+what happens if we have a value ref to a code node?
+we can't evaluate that data binding until after the code for that node is evaluated...
+this is really not nice because this means we can just cleanly eval the normal data bindings and then run the script after the fact.
+and we also can't run the script before we do the data bindings because the normal nodes won't have had their values assigned to the data bindings yet...
+
+maybe we could run the script first, but then early evaluate any bindings that are referenced in code
+so these nodes would need to be flagged as having already had their data bindings evaluated, so that we don't repeat that when we walk the tree
+
+OR maybe we really just don't want to even walk the tree to eval bindings
+maybe we should just create a linear array of dom nodes to evaluate and reorder those based on dependencies
+
+
+
+get all statically known nodes out of the way 
+
+then we only have to worry about ordering value refs and code nodes
+
+still do iterative thing for solving refs, since these can modify dom
+
+then we can worry about finding dependency chain for each of value refs and code nodes
+no dep chain means front of the line
+    make problem smaller this way
+    
+then finally, order last nodes, some sort of simple bubble sort deal
+
+value refs on their own dont have an evaluation order problem, only value refs ot code nodes
+and this is really because of the code nodes, not the value refs
+but in any case we cannot eval the refs' data bindings until after the ref'd code evaluates
+
+
+
+then there's the identifier issue
+so I think what we want to do here, even though its slightly a hack, is to just substitute the identifier node for an ANY literal.
+The Any literal is already a bit of a hack, but it is super useful for this kind of manual node insertion stuff
+and it makes the possibility of doing more of an eval rather than exec thing more plausible
+    which may be desirable for the gon use case, since we just exec each statement once
+
+

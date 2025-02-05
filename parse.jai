@@ -67,7 +67,7 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
 }
 
 
-generate_script :: (parser: *Parser) -> bool {
+generate_script :: (using parser: *Parser) -> bool {
     generate_statements :: (using parser: *Parser, node: *DOM_Node) -> bool {
         if node.type == {
             case .OBJECT; #through;
@@ -94,6 +94,17 @@ generate_script :: (parser: *Parser) -> bool {
                     return false;
                 }
                 
+                // LS.walk_nodes(*script, *assignment.right, node, #code {
+                //     node := data.(*GON.DOM_Node);
+                //     if ast_node.Node_Type == Node_Identifier {
+                //         dom_node := get_field_by_name(node, ast_node.(*LS.Node_Identifier).name);
+                //         literal := LS.alloc_node(script, LS.Node_Literal);
+                //         literal.literal_type = .ANY;
+                //         literal.any = node.data_binding;
+                //         replace_node(literal);
+                //     }
+                // });
+                
                 if prev_assignment == null {
                     parser.script.ast_root.statements = assignment;
                 } else {
@@ -110,18 +121,27 @@ generate_script :: (parser: *Parser) -> bool {
         return true;
     }
     
-    LS.init_script(*parser.script);
-    parser.script.ast_root = LS.alloc_node(*parser.script, LS.Node_Block);
-    parser.script.current_parent_node = parser.script.ast_root;
+    
+    /*
+        OK, PROBLEM:
+        each statement needs to be typechecked individually because path strings, which are just identifiers, need to be evaluated relative to the current node
+        so, we really are better off not trying to do the node replacement thing at the level of a typechecking callback
+        and really this jives with what I was thinking before, that by the time we are typechecking it would really be nice if the ast was stable and not going to change out from under us
+        
+        
+        
+    */
+    
+    LS.init_script(*script);
+    script.ast_root = LS.alloc_node(*script, LS.Node_Block);
+    script.current_parent_node = script.ast_root;
     
     if !generate_statements(parser, parser.dom_root)  return false;
-    parser.script.flags |= .PARSED;
+    script.flags |= .PARSED;
     
-    // TODO: iterate over all nodes, manually resolve identifiers
-    
-    
-    if !LS.typecheck_script(*parser.script) {
-        log("Error: failed to typecheck script.\n");
+    // TODO: remove after manual expression typechecking is completed above
+    if !LS.typecheck_script(*script) {
+        log("Error: failed to typecheck script generated for GON file.");
         return false;
     }
     
@@ -129,142 +149,6 @@ generate_script :: (parser: *Parser) -> bool {
 }
 
 
-// validate_node_references :: (using parser: *Parser) -> bool {
-//     // As we recurse to validate node references, we need to check that we don't have any dependency cycles.
-//     // Each time we jump to a referenced node, tag the current node as 'dependent' in the Node_And_Dependent struct below.
-//     // This will create a dependency chain that we can walk backwards in order to check for dependency cycles.
-//     Node_And_Dependent :: struct { node: *DOM_Node; dependent: *Node_And_Dependent; };
-    
-//     recurse :: (using parser: *Parser, using node_and_dependent: Node_And_Dependent) -> bool {
-//         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
-        
-//         // check for dependency cycles
-//         {
-//             d := dependent;
-//             while d {
-//                 if node == d.node {
-//                     sb: String_Builder;
-//                     append(*sb, "Circular dependency detected: \n")
-//                     d := dependent;
-//                     while d {
-//                         append_node_path_to_string_builder(d.node)
-//                         d = d.dependent;
-//                     }
-//                     log(builder_to_string(*sb));
-//                     return false;
-//                 }
-//                 d = d.dependent;
-//             }
-//         }
-        
-//         if node.type == {
-//             case .FIELD;
-//                 node.flags |= .REFERENCES_RESOLVED;
-//                 return .PROGRESS | .COMPLETE;
-        
-//             case .OBJECT; #through;
-//             case .ARRAY;
-//                     result: Result = .COMPLETE;
-//                     for child: node.children {
-//                         child_result := recurse(parser, .{ child, dependent });
-//                         if .ERROR       & child_result  return .ERROR;
-//                         if .REMOVE_NODE & child_result  remove;
-//                         result |=  child_result & .PROGRESS;
-//                         result &= (child_result & .COMPLETE) | ~.COMPLETE;
-//                     }
-//                     if .COMPLETE & result {
-//                         node.flags |= .REFERENCES_RESOLVED;
-//                     }
-//                     return result;
-                
-//             case .REF;
-//                 path := node.ref.text;
-//                 if path == "" {
-//                     log("Empty reference on node '%'.", format_node_path(node));
-//                     return .ERROR;
-//                 }
-                
-//                 // NOTE: this could be very problematic, since it's possible that the path we need to find just doesn't exist yet,
-//                 //       but, maybe it will exist later once some nodes have been copied and pasted elsewhere...
-//                 search_from_node := node.parent;
-//                 if path[0] == #char "/" {
-//                     advance(*path);
-//                     search_from_node = parser.dom_root;
-//                 }
-//                 ref_node := find_node_by_path(search_from_node, path);
-                
-//                 if ref_node == null {
-//                     // TODO: find a way to print failed node path only when full pass makes no progress
-//                     // maybe we collect warnings in some array and only print on error
-//                     // would want to enumerate error types and store node, then format and print later
-//                     log("WARNING: Cannot resolve ref from % to %", format_node_path(node), node.ref.text);
-//                     return .NONE;
-//                 }
-//                 node.ref.node = ref_node;
-                
-//                 // pointer and index refs can be passed along and handled later
-//                 if node.ref.type != .VALUE { 
-//                     node.flags |= .REFERENCES_RESOLVED;
-//                     return .PROGRESS | .COMPLETE;
-//                 }
-                
-//                 // value ref to value ref cannot be resolved yet
-//                 if node.ref.node.type == .REF && node.ref.node.ref.type == .VALUE {
-//                     log("WARNING: Cannot resolve value ref to value ref: %", format_node_path(node));
-//                     return .NONE;
-//                 }
-                
-//                 result: Result = .PROGRESS | .COMPLETE;
-                
-//                 if .BIND_PARENT & node.flags {
-//                     assert(ref_node.type == .OBJECT, "ref node with bind parent flag was not pointing to an object.");
-                
-//                     // we can't copy these nodes until they are all resolved, otherwise we get issues
-//                     if !(.REFERENCES_RESOLVED & ref_node.flags) {
-//                         return .NONE;
-//                     }
-                    
-//                     parent := node.parent;
-//                     for child: ref_node.children {
-//                         dst := find_child_node_by_name(parent, child.name);
-//                         if dst != null  continue;
-//                         dst = append_child_node(parent);
-//                         if !clone_node_recursive(dst, child,, node_allocator)  return .ERROR;
-//                     }
-//                     result |= .REMOVE_NODE;
-//                 }
-//                 else {
-//                     name := node.name;
-//                     if !clone_node_recursive(node, ref_node,, node_allocator)  return .ERROR;
-//                     node.name = name;
-//                 }
-                
-//                 node.flags |= .REFERENCES_RESOLVED;
-//                 return result;
-                
-//             case .INVALID;
-//                 log("Invalid node type in validate_node_references().");
-//                 return .ERROR;
-//         }
-        
-//         return .ERROR;
-//     }
-    
-//     return recurse(parser, .{ parser.dom_root, null });
-// }
-
-/*
-    NOTE: 
-    Node references are resolved iteratively is because the DOM may have new nodes added to it as value references are evaluated.
-    Were it not for value references, this would not be a concern and we could just resolve the references in a 'single pass', 
-        though we would then have to jump around the tree a bit more non-linearly when jumping to references.
-    It's really not a big deal on its own that this process is iterative rather thna recursive, but it has me thinking about the orthogonality of node references and code expressions (which I am now working on adding).
-    The index and pointer refs are still totally orthogonal to the code expressions, since they refer specifically to information about the structure of the DOM, not to the content of data bindings.
-    Value refs are still kind of orthogonal for objects, since they're structural as well and not strongly-typed.
-    But for simple fields, a value ref may as well just be an expression with just a path identifier e.g.: (`../things/stuff/item`)
-    
-    I need to just implement the script stuff and then worry more about the design... TBH
-*/
 validate_node_references :: (using parser: *Parser) -> bool {
     Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
     
@@ -400,12 +284,21 @@ process_data_bindings :: (using parser: *Parser) -> bool {
         // TODO: figure out what to do about code nodes that don't have data bindings... 
         //       will have to generate these cases as declarations instead of assignments?
         //       or maybe we just allocate room for the result in the script pool and still use an anonymous lvalue literal
-        // NOTE: script cannot be generated until after data bindings are made, so we do this here instead of in parse_file_to_dom
         if !generate_script(parser) return false;
     }
     
+    // before processing data bindings, reset the 'dependent nodes' array on DOM
+    // this will get filled when we run process bindings, for all things where evaluation order will matter
+    
     if !process_node_binding(parser, dom_root)  return false;
     
+    // then afterwards, we will sort and evaluate those nodes 
+    
+    // TODO: we will actually not execute the script as such
+    //       we will execute the statements for the nodes individually
+    //       this will get rid of the need to append nodes to ast_root.statements
+    //       and will potentiall ymake us a bit more free to do soem sort of eval thing rather than execute
+    //       because in any case, we need to be able to mix certain value refs with code nodes
     #if USING_LEAD_SHEETS {
         // code expressions get run after other data bindings are processed, and must be run in script order, not DOM-walking order
         if !LS.execute_script(*parser.script)  return false;
