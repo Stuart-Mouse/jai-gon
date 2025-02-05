@@ -94,23 +94,42 @@ generate_script :: (using parser: *Parser) -> bool {
                     return false;
                 }
                 
-                // LS.walk_nodes(*script, *assignment.right, node, #code {
-                //     node := data.(*GON.DOM_Node);
-                //     if ast_node.Node_Type == Node_Identifier {
-                //         dom_node := get_field_by_name(node, ast_node.(*LS.Node_Identifier).name);
-                //         literal := LS.alloc_node(script, LS.Node_Literal);
-                //         literal.literal_type = .ANY;
-                //         literal.any = node.data_binding;
-                //         replace_node(literal);
-                //     }
-                // });
+                // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
+                parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
                 
-                if prev_assignment == null {
-                    parser.script.ast_root.statements = assignment;
-                } else {
-                    prev_assignment.next = assignment;
+                LS.walk_nodes(*script, *assignment.right, (script: *LS.Script, ast_node: *LS.Node, data: *void) -> (bool, *LS.Node) {
+                    using data.(*type_of(parser_and_node));
+                    print("dom_node: %\n", dom_node);
+                    if ast_node.node_type == LS.Node_Identifier {
+                        path := ast_node.(*LS.Node_Identifier).name;
+                        print("path: %\n", path);
+                        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
+                        if ref_node == null {
+                            log("Error: unable to resolve node path '%'.", path);
+                            return false, null;
+                        }
+                        if ref_node.data_binding.value_pointer == null {
+                            log("Error: node '%' referenced in expression '%' had no data binding!.", path, dom_node.code.text);
+                            return false, null;
+                        }
+                        literal := LS.alloc_node(script, LS.Node_Literal);
+                        literal.literal_type = .ANY;
+                        literal.any = ref_node.data_binding;
+                        return true, literal;
+                    }
+                    return true, null;
+                }, *parser_and_node);
+                
+                if !LS.typecheck_node(*script, assignment, .IS_STATEMENT_ROOT) {
+                    log("Error: failed to typecheck expression '%'.", node.code.text);
+                    return false;
                 }
-                prev_assignment = assignment;
+                
+                // TEMP DEBUG PRINTING
+                builder: String_Builder;
+                dbg := LS.print_node(*script, assignment, *builder, 0);
+                print("%\n", builder_to_string(*builder));
+                
                 node.code.statement = assignment;
                 
             case .INVALID;
@@ -121,29 +140,11 @@ generate_script :: (using parser: *Parser) -> bool {
         return true;
     }
     
-    
-    /*
-        OK, PROBLEM:
-        each statement needs to be typechecked individually because path strings, which are just identifiers, need to be evaluated relative to the current node
-        so, we really are better off not trying to do the node replacement thing at the level of a typechecking callback
-        and really this jives with what I was thinking before, that by the time we are typechecking it would really be nice if the ast was stable and not going to change out from under us
-        
-        
-        
-    */
-    
     LS.init_script(*script);
-    script.ast_root = LS.alloc_node(*script, LS.Node_Block);
-    script.current_parent_node = script.ast_root;
+    LS.register_type(*script, "float", type_info(float));
     
     if !generate_statements(parser, parser.dom_root)  return false;
-    script.flags |= .PARSED;
-    
-    // TODO: remove after manual expression typechecking is completed above
-    if !LS.typecheck_script(*script) {
-        log("Error: failed to typecheck script generated for GON file.");
-        return false;
-    }
+    script.flags |= .PARSED | .TYPECHECKED;
     
     return true;
 }
@@ -183,12 +184,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                     return .ERROR;
                 }
                 
-                search_from_node := node.parent;
-                if path[0] == #char "/" {
-                    advance(*path);
-                    search_from_node = parser.dom_root;
-                }
-                ref_node := find_node_by_path(search_from_node, path);
+                ref_node := find_node_by_path(parser, node.parent, path);
                 
                 if ref_node == null {
                     // We just hold onto this until later, then if we really fail to resolve references, we print all nodes with unresolved refs at once.
@@ -213,7 +209,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 
                 if .BIND_PARENT & node.flags {
                     assert(ref_node.type == .OBJECT, "ref node with bind parent flag was not pointing to an object.");
-                
+                    
                     // we can't copy these nodes until they are all resolved, otherwise we get issues
                     if !(.REFERENCES_RESOLVED & ref_node.flags) {
                         return .NONE;
@@ -294,16 +290,6 @@ process_data_bindings :: (using parser: *Parser) -> bool {
     
     // then afterwards, we will sort and evaluate those nodes 
     
-    // TODO: we will actually not execute the script as such
-    //       we will execute the statements for the nodes individually
-    //       this will get rid of the need to append nodes to ast_root.statements
-    //       and will potentiall ymake us a bit more free to do soem sort of eval thing rather than execute
-    //       because in any case, we need to be able to mix certain value refs with code nodes
-    #if USING_LEAD_SHEETS {
-        // code expressions get run after other data bindings are processed, and must be run in script order, not DOM-walking order
-        if !LS.execute_script(*parser.script)  return false;
-    }
-    
     return true;
 }
 
@@ -324,8 +310,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> bool {
             return true;
             
         case .CODE;
-            // return LS.execute_node(node.code.statement);
-            return true;
+            return LS.execute_node(*script, node.code.statement);
             
         case .FIELD;
             return node.data_binding.value_pointer == null 

@@ -7,7 +7,7 @@ things {
     }
     "Thing 2" {
         numbers     [ 35, 7, 105, 3, &"../../'Thing 3'" ]
-        fraction    (3/5)
+        fraction    ( numbers[2].(float) / 5 )
         text        $"../'Thing 1'/text"
     }
     "Thing 3" {

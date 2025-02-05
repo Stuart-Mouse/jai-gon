@@ -272,7 +272,7 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 #module_parameters()(USING_LEAD_SHEETS := false);
 
 #if USING_LEAD_SHEETS {
-    LS :: #import "Lead_Sheets";
+    LS :: #import "Lead_Sheets"(DEBUG=true);
 }
 
 #load "dom.jai";

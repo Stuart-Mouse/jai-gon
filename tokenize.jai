@@ -118,18 +118,9 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         }
     }
     
-    // string OR code
-    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" || file[0] == #char "("{ 
+    // string
+    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
         quote_char := file[0];
-        
-        is_code := false;
-        if quote_char == #char "(" {
-            #if !USING_LEAD_SHEETS {
-                return make_error_token("Unable to parse code expression because Lead Sheets integration is not enabled as a module parameter.");
-            }
-            quote_char = #char ")";
-            is_code = true;
-        }
         
         if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
         string_value := string.{ 0, file.data };
@@ -142,9 +133,28 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         }
         advance(t);
         
-        // inlcuding the () in the code string to fix LS parsing bug with unexpected EOF
-        if is_code  return .{ .CODE, string.{ string_value.count+2, string_value.data-1 }, src_loc };
         return .{ .STRING, string_value, src_loc };
+    }
+    
+    if file[0] == #char "("{ 
+        #if !USING_LEAD_SHEETS {
+            return make_error_token("Unable to parse code expression because Lead Sheets integration is not enabled as a module parameter.");
+        }
+        
+        string_value := string.{ 0, file.data };
+        if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
+        
+        depth := 0;
+        while !(file[0] == #char ")" && depth == 0) {
+            depth += (file[0] == #char "(").(int);
+            depth -= (file[0] == #char ")").(int);
+            string_value.count += 1;
+            if !advance(t)  return make_error_token("Unexpected EOF while parsing code expression.");
+        }
+        advance(t);
+        string_value.count += 2;
+        
+        return .{ .CODE, string_value, src_loc };
     }
     
     // unquoted string

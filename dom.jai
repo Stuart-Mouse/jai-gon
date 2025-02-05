@@ -120,6 +120,7 @@ get_node_index :: (node: *DOM_Node) -> int {
 //     }
 // }
 
+// relative path only
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
     t: Tokenizer = .{ file = path };
     get_token(*t); // TODO: note why?
@@ -139,8 +140,24 @@ find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
     return node, index;
 }
 
+// relative or absolute path
+find_node_by_path :: (parser: *Parser, node: *DOM_Node, path: string) -> (*DOM_Node, int) {
+    if !path return null, -1;
+    search_from_node := node;
+    if path[0] == #char "/" {
+        advance(*path);
+        search_from_node = parser.dom_root;
+    }
+    ret, idx := find_node_by_path(search_from_node, path);
+    return ret, idx;
+}
+
 // will return null if not found
 find_child_node_by_name :: (parent: *DOM_Node, name: string) -> (*DOM_Node, int) {
+    if parent.type != .OBJECT && parent.type != .ARRAY {
+        return null, -1;
+    }
+    
     for parent.children
         if it.name == name  
             return it, it_index;
