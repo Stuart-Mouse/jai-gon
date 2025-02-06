@@ -23,8 +23,8 @@ Parser :: struct {
 init_parser :: (using parser: *Parser, _file: string) {
     reset(*node_pool, overwrite_memory = true);
     node_allocator = .{
-        proc = flat_pool_allocator_proc,
         data = *node_pool,
+        proc = flat_pool_allocator_proc,
     };
     tokenizer.file = _file;
     init_tokenizer(*tokenizer);
@@ -402,8 +402,9 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
                 
                 ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
                 if ref_node == null {
-                    log("Error: unable to resolve node path '%'.", path);
-                    return false, null;
+                    // log("Error: unable to resolve node path '%'.", path);
+                    // NOTE: returning true here so that we still default to normal idnetifier resolution
+                    return true, null; 
                 }
                 
                 if ref_node.data_binding.value_pointer == null {
