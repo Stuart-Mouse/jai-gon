@@ -154,11 +154,21 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
         case .FIELD;
             if node.value == "" {
                 if node.data_binding.value_pointer == null {
-                    log("ERROR: no value defined for node '%v'\n", node.name); // TODO: proc to get full path to node
+                    log("ERROR: no value defined for node '%v'\n", format_node_path(node));
                     return false;
                 }
                 
                 node.value = tprint("%", node.data_binding); // TODO
+            }
+            append(*builder, to_conformant_string(node.value,, allocator = temp));
+            
+        case .CODE;
+            if node.value == "" {
+                if node.code.text == "" {
+                    log("ERROR: empty expression on code node '%v'\n", format_node_path(node));
+                    return false;
+                }
+                node.value = tprint("(%)", node.code.text); // TODO
             }
             append(*builder, to_conformant_string(node.value,, allocator = temp));
             

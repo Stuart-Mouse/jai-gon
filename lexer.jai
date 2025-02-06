@@ -142,7 +142,7 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         }
         
         string_value := string.{ 0, file.data };
-        if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
+        if !advance(t)  return make_error_token("Unexpected EOF while parsing code expression.");
         
         depth := 0;
         while !(file[0] == #char ")" && depth == 0) {

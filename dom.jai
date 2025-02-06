@@ -9,6 +9,8 @@ DOM_Node_Flags :: enum_flags {
     ARRAY_INDEXED;
     ARRAY_ENUMERATED;
     
+    PENDING_DEPENDENCY;
+    
     // used to mark that we should not try to assign the name of a gon object to the name_member of a struct
     DONT_ASSIGN_NAME;
     
@@ -120,6 +122,7 @@ get_node_index :: (node: *DOM_Node) -> int {
 //     }
 // }
 
+// TODO: add ability to index array nodes?
 // relative path only
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
     t: Tokenizer = .{ file = path };

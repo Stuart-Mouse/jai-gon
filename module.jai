@@ -180,77 +180,6 @@ array_add_any_at_index :: (array_any: Any, index: int) -> Any {
     return Any.{ ti_array.element_type, raw_array.data + (index * ti_array.element_type.runtime_size) };
 }
 
-// convert between any types whose underlying value is essentially an integer, using s64 as intermediate value
-// tbh, maybe we should just skip the s64 intermediate and replace with a simple memcpy (actually, memset the dst to zero then memcpy src to dst sizeof whichever is smaller)
-dynamic_int_cast :: (dst: Any, src: Any, enforce_size: bool = false) -> bool {
-    if enforce_size && src.type.runtime_size > dst.type.runtime_size {
-        return false;
-    }
-    
-    if src.type.type == {
-        case .INTEGER;
-        case .ENUM;
-        case .BOOL;
-             
-        case; return false;
-    }
-    if dst.type.type == {
-        case .INTEGER;
-        case .ENUM;
-        case .BOOL;
-             
-        case; return false;
-    }
-    
-    s64_value: s64;
-  
-    if src.type.runtime_size == {
-        case 1; s64_value = src.value_pointer.(*s8 ).*.(s64);
-        case 2; s64_value = src.value_pointer.(*s16).*.(s64);
-        case 4; s64_value = src.value_pointer.(*s32).*.(s64);
-        case 8; s64_value = src.value_pointer.(*s64).*.(s64);
-    }
-  
-    if dst.type.runtime_size == {
-        case 1; dst.value_pointer.(*s8 ).* = s64_value.(s8 );
-        case 2; dst.value_pointer.(*s16).* = s64_value.(s16);
-        case 4; dst.value_pointer.(*s32).* = s64_value.(s32);
-        case 8; dst.value_pointer.(*s64).* = s64_value.(s64);
-    }
-  
-    return true;
-}
-
-dynamic_float_cast :: (dst: Any, src: Any) -> bool {
-    if dst.type.type != .FLOAT  return false;
-    
-    f64_value: float64;
-    
-    if src.type.type == {
-        case .FLOAT;
-            if src.type.runtime_size == {
-                case 4; f64_value = src.value_pointer.(*float32).*.(float64);
-                case 8; f64_value = src.value_pointer.(*float64).*;
-            }
-        case .INTEGER;
-            if src.type.runtime_size == {
-                case 1; f64_value = src.value_pointer.(*s8 ).*.(float64);
-                case 2; f64_value = src.value_pointer.(*s16).*.(float64);
-                case 4; f64_value = src.value_pointer.(*s32).*.(float64);
-                case 8; f64_value = src.value_pointer.(*s64).*.(float64);
-            }
-        case;
-            return false;
-    }
-    
-    if dst.type.runtime_size == {
-        case 4; dst.value_pointer.(*float32).* = f64_value.(float32);
-        case 8; dst.value_pointer.(*float64).* = f64_value;
-    }
-    
-    return true;
-}
-
 all_bytes_are_zero :: (any: Any) -> bool {
     return all_bytes_are_zero(any.value_pointer, any.type.runtime_size);
 }
@@ -269,6 +198,8 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 #import "Hash_Table";
 #import "Flat_Pool";
 
+#import "Data_Packer";
+
 #module_parameters()(USING_LEAD_SHEETS := false);
 
 #if USING_LEAD_SHEETS {
@@ -278,5 +209,5 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 #load "dom.jai";
 #load "parse.jai";
 #load "serialize.jai";
-#load "tokenize.jai";
+#load "lexer.jai";
 #load "io_data.jai";
