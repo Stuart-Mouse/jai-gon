@@ -66,91 +66,6 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
     return true;
 }
 
-
-generate_script :: (using parser: *Parser) -> bool {
-    generate_statements :: (using parser: *Parser, node: *DOM_Node) -> bool {
-        if node.type == {
-            case .OBJECT; #through;
-            case .ARRAY;
-                for node.children  if !generate_statements(parser, it)  return false;
-                
-            case .CODE;
-                // TODO: if node does not have data binding
-                left := LS.alloc_node(*parser.script, LS.Node_Literal);
-                left.literal_type = .ANY;
-                left.any = node.data_binding;
-                
-                assignment := LS.alloc_node(*parser.script, LS.Node_Operation);
-                assignment.name = "=";
-                assignment.operator_type = .ASSIGNMENT;
-                assignment.flags |= .MUST_BE_STATEMENT_ROOT;
-                assignment.left = left;
-                
-                // we have to reinit lexer for every expression
-                // TODO: set the lexer source location based on dom node?
-                LS.init_lexer(*script.lexer, node.code.text);
-                assignment.right = LS.parse_expression(*parser.script, 0);
-                if assignment.right == null {
-                    log("Error: unable to parse expression '%'.", node.code.text);
-                    return false;
-                }
-                
-                // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
-                parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
-                
-                LS.walk_nodes(*script, *assignment.right, (script: *LS.Script, ast_node: *LS.Node, data: *void) -> (bool, *LS.Node) {
-                    using data.(*type_of(parser_and_node));
-                    print("dom_node: %\n", dom_node);
-                    if ast_node.node_type == LS.Node_Identifier {
-                        path := ast_node.(*LS.Node_Identifier).name;
-                        print("path: %\n", path);
-                        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
-                        if ref_node == null {
-                            log("Error: unable to resolve node path '%'.", path);
-                            return false, null;
-                        }
-                        if ref_node.data_binding.value_pointer == null {
-                            log("Error: node '%' referenced in expression '%' had no data binding!.", path, dom_node.code.text);
-                            return false, null;
-                        }
-                        literal := LS.alloc_node(script, LS.Node_Literal);
-                        literal.literal_type = .ANY;
-                        literal.any = ref_node.data_binding;
-                        return true, literal;
-                    }
-                    return true, null;
-                }, *parser_and_node);
-                
-                if !LS.typecheck_node(*script, assignment, .IS_STATEMENT_ROOT) {
-                    log("Error: failed to typecheck expression '%'.", node.code.text);
-                    return false;
-                }
-                
-                // TEMP DEBUG PRINTING
-                builder: String_Builder;
-                dbg := LS.print_node(*script, assignment, *builder, 0);
-                print("%\n", builder_to_string(*builder));
-                
-                node.code.statement = assignment;
-                
-            case .INVALID;
-                log("Invalid node type in generate_script().");
-                return true;
-        }
-        
-        return true;
-    }
-    
-    LS.init_script(*script);
-    LS.register_type(*script, "float", type_info(float));
-    
-    // if !generate_statements(parser, parser.dom_root)  return false;
-    // script.flags |= .PARSED | .TYPECHECKED;
-    
-    return true;
-}
-
-
 validate_node_references :: (using parser: *Parser) -> bool {
     Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
     
@@ -276,7 +191,9 @@ validate_node_references :: (using parser: *Parser) -> bool {
 
 process_data_bindings :: (using parser: *Parser) -> bool {
     #if USING_LEAD_SHEETS {
-        if !generate_script(parser) return false;
+        // TODO: probabl;y move elsewhere. set up befor ethis so that user cna configure script stuffs
+        LS.init_script(*script);
+        LS.register_type(*script, "float", type_info(float));
     }
     
     if !process_node_binding(parser, dom_root)  return false;
@@ -364,25 +281,14 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         // TODO: if node does not have data binding?
         // NOTE: Code expressions are not even parsed and evaluated if they don't have a data binding
         
-        left := LS.alloc_node(*parser.script, LS.Node_Literal);
-        left.literal_type = .ANY;
-        left.any = node.data_binding;
-        
-        assignment := LS.alloc_node(*parser.script, LS.Node_Operation);
-        assignment.name = "=";
-        assignment.operator_type = .ASSIGNMENT;
-        assignment.flags |= .MUST_BE_STATEMENT_ROOT;
-        assignment.left = left;
-        
         // we have to reinit lexer for every expression
         // TODO: set the lexer source location based on dom node?
         LS.init_lexer(*script.lexer, node.code.text);
-        assignment.right = LS.parse_expression(*parser.script, 0);
-        if assignment.right == null {
+        expr := LS.parse_expression(*parser.script, node.code.text);
+        if expr == null {
             log("Error: unable to parse expression '%'.", node.code.text);
             return false;
         }
-        
         
         // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
         parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
@@ -416,21 +322,29 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             return true, null;
         };
         
-        if !LS.walk_nodes(*script, *assignment.right, walk_proc, *parser_and_node)  return false;
+        if !LS.walk_nodes(*script, *expr, walk_proc, *parser_and_node)  return false;
         
-        if !LS.typecheck_node(*script, assignment, .IS_STATEMENT_ROOT) {
+        expr_value_type := LS.typecheck_node(*script, expr, .IS_STATEMENT_ROOT, node.data_binding.type);
+        if expr_value_type != node.data_binding.type {
             log("Error: failed to typecheck expression '%'.", node.code.text);
             return false;
         }
         
         // TEMP DEBUG PRINTING
         builder: String_Builder;
-        dbg := LS.print_node(*script, assignment, *builder, 0);
+        dbg := LS.print_node(*script, expr, *builder, 0);
         print("%\n", builder_to_string(*builder));
         
-        node.code.statement = assignment;
+        value, ok := LS.evaluate_node(*script, expr);
+        if !ok {
+            log("Error: failed to evaluate expression '%'!", node.code.text);
+            return false;
+        }
+        assert(value.type == node.data_binding.type);
         
-        return LS.execute_node(*script, node.code.statement);
+        memcpy(node.data_binding.value_pointer, value.value_pointer, value.type.runtime_size);
+        
+        return true;
     }
     
     return true;
