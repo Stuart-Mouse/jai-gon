@@ -279,14 +279,6 @@ process_data_bindings :: (using parser: *Parser) -> bool {
         if !generate_script(parser) return false;
     }
     
-    // TODO: here, we can now do the recursive, jump-around-the-tree sort of thing and detect dependency loops as we go.
-    //       this is fine becuase now the tree is stable, even if we have remaining value refs, since those refs can only refer to code nodes
-    //       and those code nodes are all basically single-valued fields, even if that single value is a struct or array
-    //       now this does create a weird thing where the value refs to code nodes must pull the data binding, rather than pulling the value textually
-    //       so it's more strongly typed by neccessity...
-    //       wait maybe I'm dumb? if we value ref to a code node, perhaps we should just copy the code node and evaluate inplace? Or is that wierd?
-    //       in any case, I think that is what I will do for now, as it makes sense for the ref to ALL function wrt the DOM structure, while code expressions operate wrt data bindings.
-    //       so the refs are more like pre-processor macros
     if !process_node_binding(parser, dom_root)  return false;
     
     return true;

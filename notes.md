@@ -276,3 +276,35 @@ and it makes the possibility of doing more of an eval rather than exec thing mor
     which may be desirable for the gon use case, since we just exec each statement once
 
 
+
+New syntax for LSON:
+```
+// normal c-style comments
+
+// field name and value must now be separated by colon
+// fields must be separated by commas (no penalty for extraneous comma in objects)
+things: {
+    `Thing 1`: {
+        number:     100 + 5,        // expressions don't need to be enclosed in parentheses
+        friend:     &`Thing 2`,     // 
+    },
+    `Thing 2`: {
+        integers:   [ 1, 2, $'/things/Thing 1/'.number, 4, 5 - 1 ],
+        color:      RED,
+        text:       "this is a string",
+    }
+}
+```
+
+Not yet sure if I want to enforce that string-like identifiers use backticks or can also use normal quotation marks
+reason being that we want to use identifiers as field paths in value expressions, since otherwise there's ambiguity over what's just a string and whats a field name
+we could just makethe ref (`$`, `&`, and `*`) operators act on strings and return a node
+    this could be better if we still need to solve file iteratively
+        since we don't need to re-typecheck each time we exec if we evaluate a field path dynamically as an operator anyhow.
+        
+even if we use normal identifiers and subscripting to navigate the dom in value expressions, 
+    we still have the issue of getting from to a parent node from a child node
+    we could implement this with a unary operator as well, but what syntax to use? maybe prefix `^` with really high prec
+    
+    
+
