@@ -8,7 +8,7 @@ Parser_Callback :: #type (*DOM_Node) -> bool;
 
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
-    tokenizer:          Tokenizer;
+    tokenizer:          Lexer;
     dom_root:           *DOM_Node;
     node_pool:          Flat_Pool;
     node_allocator:     Allocator;
@@ -230,65 +230,52 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             if !process_node_binding(parser, it)
                 return false;
         return true;
+                
+      // case .REF;
+      //   assert(node.ref.node != null, "ref node was null");
+      //   if node.ref.type == {
+      //     case .INDEX;
+      //       // TODO: expand index ref to also work on enums and map keys
+      //       if node.data_binding.value_pointer == null  return true;
+      //       if !is_numeric_type(node.data_binding.type) {
+      //           log("Error: cannot assign node index to a data binding with non-numeric type. Node path was '%'.", format_node_path(node));
+      //           return false;
+      //       }
+      //       if !remap_data(node.data_binding, get_node_index(node.ref.node)) {
+      //           log("Error: remap_data failed for index ref on node '%'.", format_node_path(node));
+      //           return false;
+      //       }
+      //       return true;
+            
+      //     case .POINTER;
+      //       if node.data_binding.value_pointer == null  return true;
+      //       if node.ref.node.data_binding.value_pointer == null {
+      //           // TODO: have some option for this to be an error
+      //           log("Warning: no data binding on pointer ref node '%'.", format_node_path(node));
+      //           return true;
+      //       }
+            
+      //       // COME BACK HERE (LATER: AND DO WHAT?)
+      //       ref_ti     := node.ref.node.data_binding.type;
+      //       binding_ti := node.data_binding.type.(*Type_Info_Pointer).pointer_to;
+      //       if ref_ti != binding_ti {
+      //           log("pointer type mismatch % vs %", ref_ti, binding_ti);
+      //           return false;
+      //       }
+      //       node.data_binding.value_pointer.(**void).* = node.ref.node.data_binding.value_pointer;
+      //       return true;
+            
+      //     case .VALUE;
+      //       log("ERROR: got a value ref in process_node_binding. This should have already been resolved in validate_node_references.");
+      //       return false;
+      //   }
         
       case .FIELD;
-        return node.data_binding.value_pointer == null 
-            || set_value_from_string(node.data_binding, node.value);
-        
-      case .REF;
-        assert(node.ref.node != null, "ref node was null");
-        if node.ref.type == {
-          case .INDEX;
-            // TODO: expand index ref to also work on enums and map keys
-            if node.data_binding.value_pointer == null  return true;
-            if !is_numeric_type(node.data_binding.type) {
-                log("Error: cannot assign node index to a data binding with non-numeric type. Node path was '%'.", format_node_path(node));
-                return false;
-            }
-            if !remap_data(node.data_binding, get_node_index(node.ref.node)) {
-                log("Error: remap_data failed for index ref on node '%'.", format_node_path(node));
-                return false;
-            }
-            return true;
-            
-          case .POINTER;
-            if node.data_binding.value_pointer == null  return true;
-            if node.ref.node.data_binding.value_pointer == null {
-                // TODO: have some option for this to be an error
-                log("Warning: no data binding on pointer ref node '%'.", format_node_path(node));
-                return true;
-            }
-            
-            // COME BACK HERE (LATER: AND DO WHAT?)
-            ref_ti     := node.ref.node.data_binding.type;
-            binding_ti := node.data_binding.type.(*Type_Info_Pointer).pointer_to;
-            if ref_ti != binding_ti {
-                log("pointer type mismatch % vs %", ref_ti, binding_ti);
-                return false;
-            }
-            node.data_binding.value_pointer.(**void).* = node.ref.node.data_binding.value_pointer;
-            return true;
-            
-          case .VALUE;
-            log("ERROR: got a value ref in process_node_binding. This should have already been resolved in validate_node_references.");
-            return false;
-        }
-        
-      case .CODE;
         if node.data_binding.value_pointer == null {
             return true;
         }
         // TODO: if node does not have data binding?
         // NOTE: Code expressions are not even parsed and evaluated if they don't have a data binding
-        
-        // we have to reinit lexer for every expression
-        // TODO: set the lexer source location based on dom node?
-        LS.init_lexer(*script.lexer, node.code.text);
-        expr := LS.parse_expression(*parser.script, node.code.text);
-        if expr == null {
-            log("Error: unable to parse expression '%'.", node.code.text);
-            return false;
-        }
         
         // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
         parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
@@ -322,9 +309,9 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             return true, null;
         };
         
-        if !LS.walk_nodes(*script, *expr, walk_proc, *parser_and_node)  return false;
+        if !LS.walk_nodes(*script, *node.expr, walk_proc, *parser_and_node)  return false;
         
-        expr_value_type := LS.typecheck_node(*script, expr, .IS_STATEMENT_ROOT, node.data_binding.type);
+        expr_value_type := LS.typecheck_node(*script, node.expr, hint_type = node.data_binding.type);
         if expr_value_type != node.data_binding.type {
             log("Error: failed to typecheck expression '%'.", node.code.text);
             return false;
@@ -332,10 +319,10 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         
         // TEMP DEBUG PRINTING
         builder: String_Builder;
-        dbg := LS.print_node(*script, expr, *builder, 0);
+        dbg := LS.print_node(*script, node.expr, *builder, 0);
         print("%\n", builder_to_string(*builder));
         
-        value, ok := LS.evaluate_node(*script, expr);
+        value, ok := LS.evaluate_node(*script, node.expr);
         if !ok {
             log("Error: failed to evaluate expression '%'!", node.code.text);
             return false;
@@ -359,120 +346,101 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     dom_root.type = .OBJECT;
     
     parent := dom_root;
+    first_child := true;
     while L_Loop := (parent != null) {
-        name, text: string;
-        type:       Node_Type;
-        flags:      DOM_Node_Flags;
+        name:   string;
+        expr:   *LS.Node;
+        type:   Node_Type;
+        flags:  DOM_Node_Flags;
         
-        // field value ref without name inside an object will create an unnamed field with the same data binding as the parent object
-        if parent.type == .OBJECT && peek_token(*tokenizer).type == .REF_VALUE {
-            flags |= .BIND_PARENT;
-        } else {
-            // read field name
-            if parent.type != .ARRAY {
-                next_token = get_token(*tokenizer);
-                if next_token.type == .ERROR {
-                    log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                    return false;
-                }
-                if next_token.type == {
-                  case .STRING;
-                    name = next_token.text;
-                    
-                  case .EOF;
-                    if parent != dom_root {
-                        log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                        return false;
-                    }
-                    break L_Loop;
-                    
-                  case .OBJECT_END;
-                    if parent.type != .OBJECT {
-                        log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                        return false;
-                    }
-                    parent = parent.parent;
-                    continue;
-                    
-                  case;
+        if !first_child {
+            // Don't handle token here, but just verify that if there is no comma, then the scope is ending
+            if peek_token(*tokenizer).type == {
+              case .EOF;            break L_Loop;
+              case .COMMA;          get_token(*tokenizer);
+              case .OBJECT_END;     // no op
+              case .ARRAY_END;      // no op
+              case;
+                log("GON parse error: Expected comma or end of scope after field value, got % \"%\" at (%:%).", peek_token(*tokenizer).type, peek_token(*tokenizer).text, peek_token(*tokenizer).src_loc.line, peek_token(*tokenizer).src_loc.char);
+                return false;
+            }
+        }
+        first_child = false;
+        
+        // read field name
+        if parent.type != .ARRAY {
+            next_token = get_token(*tokenizer);
+            if next_token.type == .ERROR {
+                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                return false;
+            }
+            if next_token.type == {
+              case .STRING;
+                name = next_token.text;
+                
+              case .EOF;
+                if parent != dom_root {
                     log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
                     return false;
                 }
-            }
-        }
-        
-        next_token = get_token(*tokenizer);
-        if next_token.type == .ERROR {
-            log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
-            return false;
-        }
-        
-        if next_token.type == .REF_INDEX   || 
-           next_token.type == .REF_POINTER || 
-           next_token.type == .REF_VALUE {
-            
-            node := append_child_node(parent,, node_allocator);
-            node.name  = name;
-            node.type  = .REF;
-            node.flags = flags;
-            
-            if next_token.type == {
-              case .REF_INDEX;    node.ref.type = .INDEX;
-              case .REF_POINTER;  node.ref.type = .POINTER;
-              case .REF_VALUE;    node.ref.type = .VALUE;
-            }
-            
-            next_token = get_token(*tokenizer);
-            if next_token.type == .ERROR {
-                log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                return false;
-            }
-            if next_token.type != .STRING {
-                log("GON parsing error: Field ref path must be a valid string value.");
-                return false;
-            } 
-            node.ref.text = next_token.text;
-        }
-        else {
-            // read field value
-            if next_token.type == {
-              case .STRING;
-                type = .FIELD;
-                text = next_token.text;
-              case .CODE;
-                type = .CODE;
-                text = next_token.text;
-              case .OBJECT_BEGIN;
-                type = .OBJECT;
-              case .ARRAY_BEGIN;
-                type = .ARRAY;
-              case .ARRAY_END;
-                if parent.type != .ARRAY {
+                break L_Loop;
+                
+              case .OBJECT_END;
+                if parent.type != .OBJECT {
                     log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
                     return false;
                 }
                 parent = parent.parent;
                 continue;
+                
               case;
                 log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
                 return false;
             }
-            
-            assert(type != .INVALID);
-            
-            node := append_child_node(parent,, node_allocator);
-            node.name  = name;
-            node.type  = type;
-            node.flags = flags;
-            if node.type == {
-              case .OBJECT; #through;
-              case .ARRAY;
-                parent = node;
-              case .FIELD;
-                node.value = text;
-              case .CODE;
-                node.code.text = text;
+            if !expect_token_type(*tokenizer, .COLON) {
+                log("GON parse error: Expected colon after field name, got % \"%\".", next_token.type, next_token.text);
+                return false;
             }
+        }
+        
+        next_token = get_token(*tokenizer);
+        
+        // read field value
+        if next_token.type == {
+          case .VALUE_EXPR;
+            type = .FIELD;
+            expr = next_token.expr;
+          case .OBJECT_BEGIN;
+            type = .OBJECT;
+          case .ARRAY_BEGIN;
+            type = .ARRAY;
+          case .ARRAY_END;
+            if parent.type != .ARRAY {
+                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                return false;
+            }
+            parent = parent.parent;
+            continue;
+          case;
+            log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+            return false;
+        }
+        
+        assert(type != .INVALID);
+        
+        node := append_child_node(parent,, node_allocator);
+        node.name  = name;
+        node.type  = type;
+        node.flags = flags;
+        if node.type == {
+          case .OBJECT; #through;
+          case .ARRAY;
+            parent = node;
+            first_child = true;
+          case .FIELD;
+            node.expr = expr;
+          case .CODE;
+            node.code.text = text;
         }
     }
     

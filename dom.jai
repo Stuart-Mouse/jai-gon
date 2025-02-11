@@ -32,8 +32,6 @@ Node_Type :: enum {
     FIELD   :: 1;
     OBJECT  :: 2;
     ARRAY   :: 3;
-    REF     :: 4;
-    CODE    :: 5;
 }
 
 // this struct is kinda big
@@ -50,22 +48,8 @@ DOM_Node :: struct {
     data_binding: Any;
     
     using content: union {
-        ref: struct {
-            text:   string;     // TODO: rename to 'path'
-            node:   *DOM_Node;
-            type:   DOM_Node_Ref_Type;
-        };
-        
-        value: string;
-        
+        expr: *LS.Node;
         using children: DOM_Node_List;
-        
-        #if USING_LEAD_SHEETS {
-            code: struct {
-                text:       string;
-                statement:  *LS.Node;
-            }
-        }
     };
 }
 
@@ -125,7 +109,7 @@ get_node_index :: (node: *DOM_Node) -> int {
 // TODO: add ability to index array nodes?
 // relative path only
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
-    t: Tokenizer = .{ file = path };
+    t: Lexer = .{ file = path };
     get_token(*t); // TODO: note why?
     
     index := 0;
@@ -239,7 +223,7 @@ get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insert
 append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend: bool = false) -> *DOM_Node {
     node := parent;
     
-    t: Tokenizer = .{ file = path };
+    t: Lexer = .{ file = path };
     get_token(*t);
     
     while true {
@@ -319,7 +303,7 @@ clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
     return true;
 }
 
-get_next_token_from_path_string :: (t: *Tokenizer) -> Token {
+get_next_token_from_path_string :: (t: *Lexer) -> Token {
     next := get_token_or_return(t, .{ type = .ERROR });
     
     if next.type == {
