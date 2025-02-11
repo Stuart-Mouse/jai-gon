@@ -275,6 +275,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         }
         
       case .CODE;
+        #if USING_LEAD_SHEETS {
         if node.data_binding.value_pointer == null {
             return true;
         }
@@ -345,6 +346,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         memcpy(node.data_binding.value_pointer, value.value_pointer, value.type.runtime_size);
         
         return true;
+        }
     }
     
     return true;
@@ -471,7 +473,9 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
               case .FIELD;
                 node.value = text;
               case .CODE;
-                node.code.text = text;
+                #if USING_LEAD_SHEETS {
+                    node.code.text = text;
+                }
             }
         }
     }
