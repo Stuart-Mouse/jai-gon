@@ -20,14 +20,13 @@ Parser :: struct {
     }
 };
 
-init_parser :: (using parser: *Parser, _file: string) {
+init_parser :: (using parser: *Parser, file: string) {
     reset(*node_pool, overwrite_memory = true);
     node_allocator = .{
         data = *node_pool,
         proc = flat_pool_allocator_proc,
     };
-    tokenizer.file = _file;
-    init_tokenizer(*tokenizer);
+    init_tokenizer(*tokenizer, file, *parser.script);
 }
 
 deinit_parser :: (using parser: *Parser) {
@@ -44,7 +43,6 @@ parse_file_to_dom :: (file: string) -> (Parser, bool) {
     init_parser(*parser, file);
     
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
-    if !validate_node_references   (*parser)  return .{}, false;
     
     return parser, true;
 }
@@ -63,129 +61,6 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
     for bindings
         if !add_data_binding_to_dom(parser, it.binding, it.path)  
             then return false;
-    return true;
-}
-
-validate_node_references :: (using parser: *Parser) -> bool {
-    Result :: enum_flags { NONE :: 0; ERROR :: 1; COMPLETE; PROGRESS; REMOVE_NODE; };
-    
-    recurse :: (using parser: *Parser, node: *DOM_Node, unresolved_refs: *[..] *DOM_Node) -> Result {
-        if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
-        
-        if node.type == {
-          case .CODE; #through;
-          case .FIELD;
-            node.flags |= .REFERENCES_RESOLVED;
-            return .PROGRESS | .COMPLETE;
-    
-          case .OBJECT; #through;
-          case .ARRAY;
-            result: Result = .COMPLETE;
-            for child: node.children {
-                child_result := recurse(parser, child, unresolved_refs);
-                if .ERROR       & child_result  return .ERROR;
-                if .REMOVE_NODE & child_result  remove;
-                result |=  child_result & .PROGRESS;
-                result &= (child_result & .COMPLETE) | ~.COMPLETE;
-            }
-            if .COMPLETE & result {
-                node.flags |= .REFERENCES_RESOLVED;
-            }
-            return result;
-                
-          case .REF;
-            path := node.ref.text;
-            if path == "" {
-                log("Empty reference on node '%'.", format_node_path(node));
-                return .ERROR;
-            }
-            
-            ref_node := find_node_by_path(parser, node.parent, path);
-            
-            if ref_node == null {
-                // We just hold onto this until later, then if we really fail to resolve references, we print all nodes with unresolved refs at once.
-                array_add_if_unique(unresolved_refs, node);
-                return .NONE;
-            }
-            node.ref.node = ref_node;
-            
-            // pointer and index refs can be passed along and handled later
-            if node.ref.type != .VALUE { 
-                node.flags |= .REFERENCES_RESOLVED;
-                return .PROGRESS | .COMPLETE;
-            }
-            
-            // value ref to value ref cannot be resolved yet
-            if node.ref.node.type == .REF && node.ref.node.ref.type == .VALUE {
-                array_add_if_unique(unresolved_refs, node);
-                return .NONE;
-            }
-            
-            result: Result = .PROGRESS | .COMPLETE;
-            
-            if .BIND_PARENT & node.flags {
-                assert(ref_node.type == .OBJECT, "ref node with bind parent flag was not pointing to an object.");
-                
-                // we can't copy these nodes until they are all resolved, otherwise we get issues
-                if !(.REFERENCES_RESOLVED & ref_node.flags)  return .NONE;
-                
-                parent := node.parent;
-                for child: ref_node.children {
-                    dst := find_child_node_by_name(parent, child.name);
-                    if dst != null  continue;
-                    dst = append_child_node(parent);
-                    if !clone_node_recursive(dst, child,, node_allocator)  return .ERROR;
-                }
-                result |= .REMOVE_NODE;
-            }
-            else {
-                name := node.name;
-                if !clone_node_recursive(node, ref_node,, node_allocator)  return .ERROR;
-                node.name = name;
-            }
-            
-            node.flags |= .REFERENCES_RESOLVED;
-            return result;
-            
-          case .INVALID;
-            log("Invalid node type in validate_node_references().");
-            return .ERROR;
-        }
-        
-        return .ERROR;
-    }
-    
-    unresolved_refs: [..] *DOM_Node;
-    defer array_free(unresolved_refs);
-    
-    iterations := 0;
-    while true {
-        iterations += 1;
-        result: Result = .COMPLETE;
-        for child: parser.dom_root.children {
-            child_result := recurse(parser, child, *unresolved_refs);
-            if child_result & .ERROR {
-                log("Error while trying to resolve node references.");
-                return false;
-            }
-            if child_result & .REMOVE_NODE {
-                remove_node(child,, node_allocator);
-            }
-            result |=  child_result & .PROGRESS;
-            result &= (child_result & .COMPLETE) | ~.COMPLETE;
-        }
-        if   .COMPLETE & result  break;
-        if !(.PROGRESS & result) {
-            log("Unable to resolve node references:");
-            for unresolved_refs {
-                if .REFERENCES_RESOLVED & it.flags  continue;
-                log("\t% -> %", format_node_path(it), it.ref.text);
-            }
-            return false;
-        }
-    }
-    
-    log("Resolved node references in % iterations.", iterations);
     return true;
 }
 
@@ -230,45 +105,6 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             if !process_node_binding(parser, it)
                 return false;
         return true;
-                
-      // case .REF;
-      //   assert(node.ref.node != null, "ref node was null");
-      //   if node.ref.type == {
-      //     case .INDEX;
-      //       // TODO: expand index ref to also work on enums and map keys
-      //       if node.data_binding.value_pointer == null  return true;
-      //       if !is_numeric_type(node.data_binding.type) {
-      //           log("Error: cannot assign node index to a data binding with non-numeric type. Node path was '%'.", format_node_path(node));
-      //           return false;
-      //       }
-      //       if !remap_data(node.data_binding, get_node_index(node.ref.node)) {
-      //           log("Error: remap_data failed for index ref on node '%'.", format_node_path(node));
-      //           return false;
-      //       }
-      //       return true;
-            
-      //     case .POINTER;
-      //       if node.data_binding.value_pointer == null  return true;
-      //       if node.ref.node.data_binding.value_pointer == null {
-      //           // TODO: have some option for this to be an error
-      //           log("Warning: no data binding on pointer ref node '%'.", format_node_path(node));
-      //           return true;
-      //       }
-            
-      //       // COME BACK HERE (LATER: AND DO WHAT?)
-      //       ref_ti     := node.ref.node.data_binding.type;
-      //       binding_ti := node.data_binding.type.(*Type_Info_Pointer).pointer_to;
-      //       if ref_ti != binding_ti {
-      //           log("pointer type mismatch % vs %", ref_ti, binding_ti);
-      //           return false;
-      //       }
-      //       node.data_binding.value_pointer.(**void).* = node.ref.node.data_binding.value_pointer;
-      //       return true;
-            
-      //     case .VALUE;
-      //       log("ERROR: got a value ref in process_node_binding. This should have already been resolved in validate_node_references.");
-      //       return false;
-      //   }
         
       case .FIELD;
         if node.data_binding.value_pointer == null {
@@ -294,7 +130,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
                 
                 if ref_node.data_binding.value_pointer == null {
                     // TODO: actually handle this case by creating instance of hinted type?
-                    log("Error: node '%' referenced in expression '%' had no data binding!.", path, dom_node.code.text);
+                    log("Error: node '%' referenced in expression '%' had no data binding!.", path, "(TODO: print node)");
                     return false, null;
                 }
                 
@@ -313,7 +149,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         
         expr_value_type := LS.typecheck_node(*script, node.expr, hint_type = node.data_binding.type);
         if expr_value_type != node.data_binding.type {
-            log("Error: failed to typecheck expression '%'.", node.code.text);
+            log("Error: failed to typecheck expression '%'.", "(TODO: print node)");
             return false;
         }
         
@@ -324,10 +160,12 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         
         value, ok := LS.evaluate_node(*script, node.expr);
         if !ok {
-            log("Error: failed to evaluate expression '%'!", node.code.text);
+            log("Error: failed to evaluate expression '%'!", "(TODO: print node)");
             return false;
         }
-        assert(value.type == node.data_binding.type);
+        print("%, %\n", value.type, value.value_pointer);
+        print("%, %\n", node.data_binding.type, node.data_binding.value_pointer);
+        assert(value.type == node.data_binding.type, "% != %", as_type(value.type), as_type(node.data_binding.type));
         
         memcpy(node.data_binding.value_pointer, value.value_pointer, value.type.runtime_size);
         
@@ -398,16 +236,15 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 return false;
             }
             if !expect_token_type(*tokenizer, .COLON) {
-                log("GON parse error: Expected colon after field name, got % \"%\".", next_token.type, next_token.text);
+                log("GON parse error: Expected colon after field name, got % \"%\".", peek_token(*tokenizer).type, peek_token(*tokenizer).text);
                 return false;
             }
         }
         
-        next_token = get_token(*tokenizer);
-        
         // read field value
+        next_token = get_token(*tokenizer, can_be_expression = true);
         if next_token.type == {
-          case .VALUE_EXPR;
+          case .EXPRESSION;
             type = .FIELD;
             expr = next_token.expr;
           case .OBJECT_BEGIN;
@@ -439,8 +276,6 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             first_child = true;
           case .FIELD;
             node.expr = expr;
-          case .CODE;
-            node.code.text = text;
         }
     }
     
@@ -703,34 +538,12 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             return false;
         }
 
-
-      case .REF;
-        if node.ref.type == {
-          case .VALUE;
-            log("ERROR: Trying to bind to a value ref node @ %!", format_node_path(node));
-            return false;
-            
-          case .INDEX;
-            if binding.type.type == {
-              case .INTEGER;
-              case .FLOAT;
-              case .ENUM; // TODO: will need special handling here for enum-indexed arrays
-              case;
-                return false;
-            }
-            
-          case .POINTER;
-            // all we can do here is check that the data binding is actually a pointer type
-            if binding.type.type != .POINTER  return false;
-        }
-        
-        
-      case .CODE; 
-        // TODO: we probably need extra validation stuff here
-        
       case;
         // TODO: invalid node type error?
     }
     
     return true;
 }
+
+
+as_type :: inline (ti: *Type_Info) -> Type { return (cast(*Type)*ti).*; }

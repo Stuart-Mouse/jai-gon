@@ -14,4 +14,3 @@ things: {
     }
 }
 
-flags: [ first, third ],

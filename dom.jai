@@ -109,8 +109,8 @@ get_node_index :: (node: *DOM_Node) -> int {
 // TODO: add ability to index array nodes?
 // relative path only
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
-    t: Lexer = .{ file = path };
-    get_token(*t); // TODO: note why?
+    t: Lexer;
+    init_tokenizer(*t, path);
     
     index := 0;
     while node != null {
@@ -223,8 +223,8 @@ get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insert
 append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend: bool = false) -> *DOM_Node {
     node := parent;
     
-    t: Lexer = .{ file = path };
-    get_token(*t);
+    t: Lexer;
+    init_tokenizer(*t, path);
     
     while true {
         next := get_next_token_from_path_string(*t);
@@ -286,12 +286,6 @@ clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
       case .OBJECT; #through;
       case .ARRAY;
         return clone_child_nodes_recursive(dst, src);
-        
-      case .REF;
-        dst.ref = src.ref;
-        if dst.ref.type == .VALUE {
-            log_error("ERROR: cloned a value ref node @ %v", format_node_path(dst));
-        }
         
       case .FIELD;
         dst.value = src.value;
