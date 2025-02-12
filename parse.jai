@@ -8,25 +8,32 @@ Parser_Callback :: #type (*DOM_Node) -> bool;
 
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
-    tokenizer:          Lexer;
     dom_root:           *DOM_Node;
     node_pool:          Flat_Pool;
     node_allocator:     Allocator;
     callbacks:          [..] Parser_Callback;
     
-    #if USING_LEAD_SHEETS {
-        // TODO: could we use just portions of script? will require refactoring LS internals
-        script:         LS.Script;
-    }
+    // state pulled out from lexer
+    file:               string;
+    cursor_location:    Source_Location;
+    
+    // TODO: could we use just portions of script? will require refactoring LS internals
+    script:             LS.Script;
 };
 
-init_parser :: (using parser: *Parser, file: string) {
-    reset(*node_pool, overwrite_memory = true);
-    node_allocator = .{
-        data = *node_pool,
+init_parser :: (parser: *Parser, file: string) {
+    reset(*parser.node_pool, overwrite_memory = true);
+    parser.node_allocator = .{
+        data = *parser.node_pool,
         proc = flat_pool_allocator_proc,
     };
-    init_tokenizer(*tokenizer, file, *parser.script);
+    parser.file = file;
+    
+    LS.init_script(*parser.script);
+    print("allocator: %\n", parser.script.allocator);
+    
+    // TODO: move this elsewhere, this is just for testing
+    LS.register_common_types(*parser.script); 
 }
 
 deinit_parser :: (using parser: *Parser) {
@@ -38,20 +45,17 @@ deinit_parser :: (using parser: *Parser) {
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
 // after calling this, you can just add your data bindings and then process them
-parse_file_to_dom :: (file: string) -> (Parser, bool) {
+
+// TODO: it is currently CRITICAL that this is an inline proc, since the allocators in the parser and script point to pools on the parser and script themselves, respectively.
+//       this feels like maybe a bad thing, and perhaps both of these should instead just have the user set the allocator manually.
+//       but on the other hand, using them with a pool is the most likely case, and shouldn't the default be nice to use?
+parse_file_to_dom :: inline (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
-    
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
-    
     return parser, true;
 }
 
-/*
-    We are no longer appending to a dynamic array of data bindings, instead just inserting those data bindings immediately when this is called by the user.
-    Which is nice because that means we save a little bit of memory on that and we don't need the Data_Binding struct Anymore.
-    We also don't have to split the path into substrings, since we just process it one piece at a time as we insert the binding.
-*/
 add_data_binding_to_dom :: (using parser: *Parser, binding: Any, path: string) -> bool {
     node := find_node_by_path(parser.dom_root, path);
     return add_data_binding_to_node(node, binding);
@@ -65,15 +69,7 @@ add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { bindin
 }
 
 process_data_bindings :: (using parser: *Parser) -> bool {
-    #if USING_LEAD_SHEETS {
-        // TODO: probabl;y move elsewhere. set up befor ethis so that user cna configure script stuffs
-        LS.init_script(*script);
-        LS.register_type(*script, "float", type_info(float));
-    }
-    
-    if !process_node_binding(parser, dom_root)  return false;
-    
-    return true;
+    return process_node_binding(parser, dom_root);
 }
 
 process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bool {
@@ -110,8 +106,8 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         if node.data_binding.value_pointer == null {
             return true;
         }
-        // TODO: if node does not have data binding?
-        // NOTE: Code expressions are not even parsed and evaluated if they don't have a data binding
+        
+        print("%\n", format_node_path(node));
         
         // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
         parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
@@ -163,8 +159,6 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             log("Error: failed to evaluate expression '%'!", "(TODO: print node)");
             return false;
         }
-        print("%, %\n", value.type, value.value_pointer);
-        print("%, %\n", node.data_binding.type, node.data_binding.value_pointer);
         assert(value.type == node.data_binding.type, "% != %", as_type(value.type), as_type(node.data_binding.type));
         
         memcpy(node.data_binding.value_pointer, value.value_pointer, value.type.runtime_size);
@@ -175,31 +169,39 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
     return true;
 }
 
+/*
+    Construction of the dom is done iteratively instead of recursively, since we can trivially track the current parent node and retrieve it's parent node when we would otherwise return.
+    Although, if we ever remove the pointer to parent from DOM nodes, we may go ahead and just make this recursive.
+*/
 construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
-    next_token: Token;
-    ok: bool;
-    
     dom_root      = New(DOM_Node,, node_allocator);
     dom_root.name = "root";
     dom_root.type = .OBJECT;
     
-    parent := dom_root;
+    // ideally, we would just be able to replace the token after it's consumed so that we are always kind of peeking it, but the problem is that we need to be able to tell the lexer what we expect to see (name or value)
+    next_token: Token;
     first_child := true;
+    
+    parent := dom_root;
     while L_Loop := (parent != null) {
         name:   string;
         expr:   *LS.Node;
         type:   Node_Type;
-        flags:  DOM_Node_Flags;
         
+        // NOTE: Unlike JSON, we don't enforce that there is NOT a trailing comma after the last field in a scope
         if !first_child {
-            // Don't handle token here, but just verify that if there is no comma, then the scope is ending
-            if peek_token(*tokenizer).type == {
-              case .EOF;            break L_Loop;
-              case .COMMA;          get_token(*tokenizer);
-              case .OBJECT_END;     // no op
-              case .ARRAY_END;      // no op
+            // NOTE: We put the token back manually here instead of implementing a peek_token() proc, 
+            //       since peeking a token is potentially non-trivial with how things currently are factored.
+            //       In this case it is fine though, since the only case where it would be non-trivial is an error.
+            _file := parser.file;
+            next_token = lex_next_token(parser);
+            if next_token.type == {
+              case .COMMA;          // no op, consume the token
+              case .OBJECT_END;     #through;
+              case .ARRAY_END;      #through;
+              case .EOF;            parser.file = _file; // put the token back manually
               case;
-                log("GON parse error: Expected comma or end of scope after field value, got % \"%\" at (%:%).", peek_token(*tokenizer).type, peek_token(*tokenizer).text, peek_token(*tokenizer).src_loc.line, peek_token(*tokenizer).src_loc.char);
+                log("GON parse error: Expected comma or end of scope after field value, got % \"%\" at (%:%).", next_token.type, next_token.text, next_token.src_loc.line, next_token.src_loc.char);
                 return false;
             }
         }
@@ -207,11 +209,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         
         // read field name
         if parent.type != .ARRAY {
-            next_token = get_token(*tokenizer);
-            if next_token.type == .ERROR {
-                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                return false;
-            }
+            next_token = lex_next_token(parser);
             if next_token.type == {
               case .STRING;
                 name = next_token.text;
@@ -235,22 +233,27 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
                 return false;
             }
-            if !expect_token_type(*tokenizer, .COLON) {
-                log("GON parse error: Expected colon after field name, got % \"%\".", peek_token(*tokenizer).type, peek_token(*tokenizer).text);
+            
+            next_token = lex_next_token(parser);
+            if next_token.type != .COLON {
+                log("GON parse error: Expected colon after field name, got % \"%\".", next_token.type, next_token.text);
                 return false;
             }
         }
         
         // read field value
-        next_token = get_token(*tokenizer, can_be_expression = true);
+        next_token = lex_next_token(parser, expect_expression = true);
         if next_token.type == {
           case .EXPRESSION;
             type = .FIELD;
             expr = next_token.expr;
+            
           case .OBJECT_BEGIN;
             type = .OBJECT;
+            
           case .ARRAY_BEGIN;
             type = .ARRAY;
+            
           case .ARRAY_END;
             if parent.type != .ARRAY {
                 log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
@@ -258,6 +261,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             }
             parent = parent.parent;
             continue;
+            
           case;
             log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
             return false;
@@ -268,12 +272,12 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         node := append_child_node(parent,, node_allocator);
         node.name  = name;
         node.type  = type;
-        node.flags = flags;
         if node.type == {
           case .OBJECT; #through;
           case .ARRAY;
             parent = node;
             first_child = true;
+            
           case .FIELD;
             node.expr = expr;
         }

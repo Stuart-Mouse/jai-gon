@@ -149,10 +149,10 @@ array_add_any_nocheck :: (array: *Resizable_Array, elem_type: *Type_Info) -> Any
 }
 
 /*
-  This procedure is duplicated verbatim from Basic/Array, since the procedure is limited to file scope there.
-  We need this in order to properly reserve space for any type of resizeable array.
-  Perhaps there's a way to get import it from basic despite being file scoped?
-    I'll have to look into that eventually...
+    This procedure is duplicated verbatim from Basic/Array, since the procedure is limited to file scope there.
+    We need this in order to properly reserve space for any type of resizeable array.
+    Perhaps there's a way to get import it from basic despite being file scoped?
+      I'll have to look into that eventually...
 */
 array_reserve_nonpoly :: (array: *Resizable_Array, desired_items: s64, elem_size: s64) {
     if desired_items <= array.allocated return;

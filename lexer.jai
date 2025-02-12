@@ -1,3 +1,21 @@
+/*
+    NOTE:
+    
+    Due to the need to reference the LS script and the lack of need for any sort of look-ahead on the lexer, 
+    the lexer has just been removed and what was left of it (just file and cursor_location) have been moved into the parser itself.
+    
+    Lexing here is a bit weird because GON is dead simple, but we complicate it by introducing Lead Sheets expressions, which are just considered a token in GON.
+    Before we even lex the next token, we know whether we expect a field name or value (identifier or expression),
+        so instead of going to Lead Sheets to parse identifiers, we just do that here.
+    We could just catch the parsed expression before returning it and verify that it's just a simple identifier, 
+        but why even go to the extra trouble y'know? Except that now we've duplicated the identifier parsing logic.
+    But, then there's also the additional wrinkle that we want to allow basically any string to be an identifier in GON.
+    This is already sort of supported by Lead Sheets with backticked strings, but it's nicer if we can just use standard quotation marks around string-y field names.
+    Also, we occasionally use integers as field names in GON, for indexed arrays (which are formatted as GON objects with the child fields having integers for names). 
+        But this cannot be checked until later, so...
+    
+    Basically all this to say that GON lexing is weird with lead sheets right now and the rules about GON field names are weird too.
+*/
 
 whitespace_chars :: " \t\r\n\0";
 reserved_chars   :: "~!@#$%^&:*{}[]()\"";
@@ -21,7 +39,7 @@ Token_Type :: enum u8 {
     ARRAY_BEGIN;
     ARRAY_END;
     
-    STRING;
+    STRING;         // TODO: maybe this should be IDENTIFIER instead?
     EXPRESSION;
     
     COMMA;
@@ -32,89 +50,14 @@ Source_Location :: struct {
     line, char: int;
 }
 
-Lexer :: struct {
-    file:               string;
-    next_token:         Token;
-    cursor_location:    Source_Location;
-    
-    script:             *LS.Script;
-}
-
-init_tokenizer :: (t: *Lexer, file: string = "", script: *LS.Script = null) {
-    t.file   = file;
-    t.script = script;
-    t.cursor_location = .{ line = 1, char = 1 };
-    get_token(t);
-}
-
-// TODO: stop using lexer to parse path strings
-// because of how we are calling into the lead sheets lexer, we can't get back a simple .STRING token normally
-// so for now I'm just hacking it to take a hint that we can actually handle an expression
-// OR what we could (and probably should do), we could write a little function to hand off the file between a gon and LS lexer
-// that way they can just be separate and we just trade back and forth the source location and file string
-// but this is actually not nice either...
-
-get_token_or_return :: (using t: *Lexer, code: Code, can_be_expression := false) -> Token #expand {
-    token := get_token(t);
-    if token.type == .ERROR  `return #insert code;
-    return token;
-}
-
-get_token :: inline (using t: *Lexer, can_be_expression := false) -> Token {
-    if next_token.type == .ERROR {
-        log("TOKENIZER ERROR: % (line %, char %)\n", next_token.text, next_token.src_loc.line, next_token.src_loc.char);
-        return next_token;
-    }
-    
-    current_token := next_token;
-    next_token = lex_next_token(t);
-    
-    // if we aren't expecting to handle an expression, then try and just get a simple identifier/string
-    if current_token.type == .EXPRESSION && !can_be_expression {
-        if current_token.expr.node_type == {
-          case LS.Node_Literal;
-            literal := current_token.expr.(*LS.Node_Literal);
-            if literal.literal_type == .STRING {
-                current_token.type = .STRING;
-                current_token.text = literal.text;
-                return current_token;
-            }
-          case LS.Node_Identifier;
-            current_token.type = .STRING;
-            current_token.text = current_token.expr.(*LS.Node_Identifier).name;
-            return current_token;
-        }
-        
-        current_token.type = .ERROR;
-        current_token.text = "Parsed something that looked like an expression when a simple string was expected.";
-        return current_token;
-    }
-    
-    return current_token;
-}
-
-peek_token :: inline (using t: *Lexer) -> Token {
-    return next_token;
-}
-
-// consumes token if it was expected type, else it was just peeked
-expect_token_type :: (using t: *Lexer, type: Token_Type) -> bool {
-    token := peek_token(t);
-    if token.type == type {
-        get_token(t);
-        return true;
-    }
-    return false;
-}
-
 // some helper procs
 is_numeric :: inline (char: u8) -> bool {
     return char >= #char "0" && char <= #char "9";
 }
 
 // mutates the passed string, advancing it to the position after the returned token
-lex_next_token :: (using t: *Lexer) -> Token {
-    if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
+lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
+    if !skip_whitespace_and_comments(p)  return .{ type = .EOF };
     
     src_loc := cursor_location;
     make_error_token :: (error_string: string = "") -> Token #expand { 
@@ -123,23 +66,48 @@ lex_next_token :: (using t: *Lexer) -> Token {
     
     // single character tokens, structural
     if file[0] == {
-      case #char "{";  advance(t);  return .{ type = .OBJECT_BEGIN, text = "{", src_loc = src_loc };
-      case #char "}";  advance(t);  return .{ type = .OBJECT_END,   text = "}", src_loc = src_loc };
-      case #char "[";  advance(t);  return .{ type = .ARRAY_BEGIN,  text = "[", src_loc = src_loc };
-      case #char "]";  advance(t);  return .{ type = .ARRAY_END,    text = "]", src_loc = src_loc };
-      case #char ":";  advance(t);  return .{ type = .COLON,        text = ":", src_loc = src_loc };
-      case #char ",";  advance(t);  return .{ type = .COMMA,        text = ",", src_loc = src_loc };
+      case #char "{";  advance(p);  return .{ type = .OBJECT_BEGIN, text = "{", src_loc = src_loc };
+      case #char "}";  advance(p);  return .{ type = .OBJECT_END,   text = "}", src_loc = src_loc };
+      case #char "[";  advance(p);  return .{ type = .ARRAY_BEGIN,  text = "[", src_loc = src_loc };
+      case #char "]";  advance(p);  return .{ type = .ARRAY_END,    text = "]", src_loc = src_loc };
+      case #char ":";  advance(p);  return .{ type = .COLON,        text = ":", src_loc = src_loc };
+      case #char ",";  advance(p);  return .{ type = .COMMA,        text = ",", src_loc = src_loc };
     }
     
-    // else defer to lead sheets to parse an expression
-    // we pass this expression node back up in the GON token
-    assert(script != null);
-    
-    node, cursor := LS.parse_expression(script, file, expect_eof = false);
-    if node != null {
-        assert(cursor != null);
-        advance(t, cursor - file.data);
-        return .{ type = .EXPRESSION, expr = node, src_loc = src_loc };
+    if expect_expression {
+        node, cursor := LS.parse_expression(*script, file, expect_eof = false);
+        if node != null {
+            assert(cursor != null);
+            advance(p, cursor - file.data);
+            return .{ type = .EXPRESSION, expr = node, src_loc = src_loc };
+        }
+    } else {
+        // parse a field name
+        
+        // with quotes
+        if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
+            quote_char := file[0];
+            if !advance(p)  return make_error_token("Unexpected EOF while parsing string.");
+            string_value := string.{ 0, file.data };
+            while file[0] != quote_char {
+                // TODO: handle escape sequences more properly
+                adv := 1 + (file[0] == #char "\\").(int); 
+                string_value.count += adv;
+                if !advance(p, adv)  return make_error_token("Unexpected EOF while parsing string.");
+            }
+            advance(p);
+            return .{ type = .STRING, text = string_value, src_loc = src_loc };
+        }
+        
+        // without quotes
+        if is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
+            string_value := string.{ 0, file.data };
+            while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
+                string_value.count += 1;
+                if !advance(p)  break;
+            }
+            return .{ type = .STRING, text = string_value, src_loc = src_loc };
+        }
     }
     
     return make_error_token("Unexpected character encountered.");
@@ -147,15 +115,15 @@ lex_next_token :: (using t: *Lexer) -> Token {
 
 
 // cycles between skipping whitespace and comments until next character is neither
-skip_whitespace_and_comments :: (using t: *Lexer) -> bool {
+skip_whitespace_and_comments :: (using p: *Parser) -> bool {
     if file.count == 0 return false;
     while true {
         while is_whitespace(file[0]) {
-            if !advance(t) return false;
+            if !advance(p) return false;
         }
         if file[0] == #char "#" {
             while file[0] != #char "\n" {
-                if !advance(t) return false;
+                if !advance(p) return false;
             }
         }
         else return true;
@@ -173,7 +141,7 @@ is_whitespace :: inline (char: u8) -> bool {
 
 #scope_module
 
-advance :: inline (using t: *Lexer, amount := 1) -> bool {
+advance :: inline (using p: *Parser, amount := 1) -> bool {
     _amount := min(amount, file.count);
     
     for 0.._amount-1 {
