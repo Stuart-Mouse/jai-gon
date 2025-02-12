@@ -360,8 +360,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 } else {
                     count_before := raw_array.count;
-                    array_reserve_nonpoly(xx raw_array, count_before + node.count, ti_array.element_type.runtime_size);
-                    raw_array.count += node.count;
+                    array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
+                    raw_array.count += node.children.count;
                     for node.children {
                         elem_any := Any.{
                             value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
@@ -391,7 +391,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         add_data_binding_to_node(child, elem_any);
                     }
                 } else {
-                    if node.count > elem_count {
+                    if node.children.count > elem_count {
                         log("Error: too many elements in array.");
                         return false;
                     }
@@ -446,7 +446,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             case .STRUCT;
                 ti_struct := node.data_binding.type.(*Type_Info_Struct);
 
-                if node.count > ti_struct.members.count {
+                if node.children.count > ti_struct.members.count {
                     log("Data binding error: array-type struct contains too many elements.");
                     return false;
                 }
@@ -481,8 +481,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         We won't do this unless we need to though. For now, the current method is fine.
                     */
                     count_before := raw_array.count;
-                    array_reserve_nonpoly(xx raw_array, count_before + node.count, ti_array.element_type.runtime_size);
-                    raw_array.count += node.count;
+                    array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
+                    raw_array.count += node.children.count;
                     for node.children {
                         elem_any := Any.{
                             value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
@@ -492,7 +492,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 } else {
                     elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
-                    if node.count > elem_count {
+                    if node.children.count > elem_count {
                         log("Data binding error: bounds check failed on array or slice.");
                         return false;
                     }

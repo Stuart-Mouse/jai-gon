@@ -26,10 +26,6 @@ Token_Type :: enum u8 {
     
     COMMA;
     COLON;
-    
-    PATH_SPLIT;
-    PATH_HERE;
-    PATH_PARENT;
 }
 
 Source_Location :: struct {
@@ -135,55 +131,15 @@ lex_next_token :: (using t: *Lexer) -> Token {
       case #char ",";  advance(t);  return .{ type = .COMMA,        text = ",", src_loc = src_loc };
     }
     
-    // TODO: path tokens here are problematic. we will need this to be enabled only by some flag in the tokenizer
-    // tokens only used in path strings, maybe we have a param to skip these when not parsing for a path
-    if file[0] == #char "/" {
-        advance(t);
-        return .{ type = .PATH_SPLIT, text = "", src_loc = src_loc };
-    }
-    // not very correct, but whatever for now
-    if begins_with(file, "..") {
-        advance(t, 2);
-        return .{ type = .PATH_PARENT, text = "", src_loc = src_loc };
-    }
-    
     // else defer to lead sheets to parse an expression
     // we pass this expression node back up in the GON token
-    if !script {
-        // TODO: this is bad, but we need this as a backup since we can't always init lexer with a script
-        //       specifically, when its being used to parse path strings
-        //       in reality we should not be using the lexer for path strings at all but until I can fix that...
-        
-        // string
-        if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
-            quote_char := file[0];
-            if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
-            string_value := string.{ 0, file.data };
-            while file[0] != quote_char {
-                // TODO: handle escape sequences more properly
-                adv := 1 + (file[0] == #char "\\").(int); 
-                string_value.count += adv;
-                if !advance(t, adv)  return make_error_token("Unexpected EOF while parsing string.");
-            }
-            advance(t);
-            return .{ type = .STRING, text = string_value, src_loc = src_loc };
-        }
-        // unquoted string
-        if is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-            string_value := string.{ 0, file.data };
-            while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-                string_value.count += 1;
-                if !advance(t)  break;
-            }
-            return .{ type = .STRING, text = string_value, src_loc = src_loc };
-        }
-    } else {
-        node, cursor := LS.parse_expression(script, file, expect_eof = false);
-        if node != null {
-            assert(cursor != null);
-            advance(t, cursor - file.data);
-            return .{ type = .EXPRESSION, expr = node, src_loc = src_loc };
-        }
+    assert(script != null);
+    
+    node, cursor := LS.parse_expression(script, file, expect_eof = false);
+    if node != null {
+        assert(cursor != null);
+        advance(t, cursor - file.data);
+        return .{ type = .EXPRESSION, expr = node, src_loc = src_loc };
     }
     
     return make_error_token("Unexpected character encountered.");
@@ -213,7 +169,6 @@ is_whitespace :: inline (char: u8) -> bool {
       || char == #char "\r"
       || char == #char "\n";
 }
-
 
 
 #scope_module
