@@ -2,10 +2,6 @@
 
 Parser_Callback :: #type (*DOM_Node) -> bool;
 
-// Parser_Flags :: enum_flags {
-//     SKIP_PATHS_WITHOUT_BINDINGS;
-// };
-
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     tokenizer:          Tokenizer;
@@ -16,17 +12,20 @@ Parser :: struct {
 };
 
 init_parser :: (using parser: *Parser, _file: string) {
-    reset(*node_pool, overwrite_memory = true);
-    node_allocator = .{
-        data = *node_pool,
-        proc = flat_pool_allocator_proc,
-    };
+    // reset(*node_pool, overwrite_memory = true);
+    // node_allocator = .{
+    //     data = *node_pool,
+    //     proc = flat_pool_allocator_proc,
+    // };
+    node_allocator = context.allocator;
     tokenizer.file = _file;
     init_tokenizer(*tokenizer);
 }
 
 deinit_parser :: (using parser: *Parser) {
-    fini(*node_pool);
+    // fini(*node_pool);
+    delete_child_nodes_recursive(dom_root);
+    free(dom_root);
     dom_root = null;
     
     array_free(callbacks);
@@ -71,7 +70,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
           case .FIELD;
             node.flags |= .REFERENCES_RESOLVED;
             return .PROGRESS | .COMPLETE;
-    
+            
           case .OBJECT; #through;
           case .ARRAY;
             result: Result = .COMPLETE;
@@ -86,9 +85,9 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 node.flags |= .REFERENCES_RESOLVED;
             }
             return result;
-                
+            
           case .REF;
-            path := node.ref.text;
+            path := node.ref.path;
             if path == "" {
                 log("Empty reference on node '%'.", format_node_path(node));
                 return .ERROR;
@@ -173,7 +172,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
             log("Unable to resolve node references:");
             for unresolved_refs {
                 if .REFERENCES_RESOLVED & it.flags  continue;
-                log("\t% -> %", format_node_path(it), it.ref.text);
+                log("\t% -> %", format_node_path(it), it.ref.path);
             }
             return false;
         }
@@ -275,9 +274,10 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     
     parent := dom_root;
     while L_Loop := (parent != null) {
-        name, text: string;
-        type:       Node_Type;
-        flags:      DOM_Node_Flags;
+        name, text:         string;
+        type:               Node_Type;
+        flags:              DOM_Node_Flags;
+        source_location:    Source_Location;
         
         // field value ref without name inside an object will create an unnamed field with the same data binding as the parent object
         if parent.type == .OBJECT && peek_token(*tokenizer).type == .REF_VALUE {
@@ -293,6 +293,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 if next_token.type == {
                   case .STRING;
                     name = next_token.text;
+                    source_location = next_token.location;
                     
                   case .EOF;
                     if parent != dom_root {
@@ -346,7 +347,8 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 log("GON parsing error: Field ref path must be a valid string value.");
                 return false;
             } 
-            node.ref.text = next_token.text;
+            node.ref.path = next_token.text;
+            node.source_location = ifx source_location.line then source_location else next_token.location;
         }
         else {
             // read field value
@@ -354,10 +356,13 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
               case .STRING;
                 type = .FIELD;
                 text = next_token.text;
+                
               case .OBJECT_BEGIN;
                 type = .OBJECT;
+                
               case .ARRAY_BEGIN;
                 type = .ARRAY;
+                
               case .ARRAY_END;
                 if parent.type != .ARRAY {
                     log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
@@ -365,6 +370,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 }
                 parent = parent.parent;
                 continue;
+                
               case;
                 log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
                 return false;
@@ -376,10 +382,12 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             node.name  = name;
             node.type  = type;
             node.flags = flags;
+            node.source_location = ifx source_location.line then source_location else next_token.location;
             if node.type == {
               case .OBJECT; #through;
               case .ARRAY;
                 parent = node;
+                
               case .FIELD;
                 node.value = text;
             }

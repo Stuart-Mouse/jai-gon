@@ -6,7 +6,7 @@ whitespace_and_reserved_chars :: #run join(whitespace_chars, reserved_chars);
 Token :: struct {
     type:       Token_Type;
     text:       string;
-    src_loc:    Source_Location;
+    location:   Source_Location;
 }
 
 Token_Type :: enum u8 {
@@ -48,7 +48,7 @@ get_token_or_return :: (using t: *Tokenizer, code: Code) -> Token #expand {
 
 get_token :: inline (using t: *Tokenizer) -> Token {
     if next_token.type == .ERROR {
-        log("TOKENIZER ERROR: % (line %, char %)\n", next_token.text, next_token.src_loc.line, next_token.src_loc.char);
+        log("TOKENIZER ERROR: % (line %, char %)\n", next_token.text, next_token.location.line, next_token.location.char);
         return next_token;
     }
     
@@ -75,20 +75,20 @@ expect_token_type :: (using t: *Tokenizer, type: Token_Type) -> bool {
 lex_next_token :: (using t: *Tokenizer) -> Token {
     if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
     
-    src_loc := cursor_location;
+    location := cursor_location;
     make_error_token :: (error_string: string = "") -> Token #expand { 
-        return .{ type = .ERROR, src_loc = src_loc, text = error_string }; 
+        return .{ type = .ERROR, location = location, text = error_string }; 
     }
     
     // single character tokens
     if file[0] == {
-      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "{", src_loc };
-      case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", src_loc };
-      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", src_loc };
-      case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", src_loc };
-      case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", src_loc };
-      case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", src_loc };
-      case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", src_loc };
+      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "{", location };
+      case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", location };
+      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", location };
+      case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", location };
+      case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", location };
+      case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", location };
+      case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", location };
     }
     
     // some helper procs
@@ -115,7 +115,7 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         }
         advance(t);
         
-        return .{ .STRING, string_value, src_loc };
+        return .{ .STRING, string_value, location };
     }
     
     // unquoted string
@@ -127,7 +127,7 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
             if !advance(t)  break;
         }
         
-        return .{ .STRING, string_value, src_loc };
+        return .{ .STRING, string_value, location };
     }
     
     return make_error_token("Unexpected character encountered.");

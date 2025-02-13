@@ -11,12 +11,13 @@ DOM_Node_Flags :: enum_flags {
     
     PENDING_DEPENDENCY;
     
+    // TODO: this can probably be removed
     // used to mark that we should not try to assign the name of a gon object to the name_member of a struct
     DONT_ASSIGN_NAME;
     
     // used to indicate that a field assumes the parent object's binding, used for special field value ref syntax
     BIND_PARENT;
-
+    
     // formatting flags
     SAME_LINE;
 }
@@ -44,11 +45,11 @@ DOM_Node :: struct {
     type:               Node_Type;
     flags:              DOM_Node_Flags;
     data_binding:       Any;
-    // source_location:    Source_Location;
+    source_location:    Source_Location;
     
     using content: union {
         ref: struct {
-            text:   string;     // TODO: rename to 'path'
+            path:   string;
             node:   *DOM_Node;
             type:   DOM_Node_Ref_Type;
         };
@@ -101,14 +102,14 @@ get_node_index :: (node: *DOM_Node) -> int {
 }
 
 // does not delete the passed node or its neighbors, only children
-// delete_child_nodes_recursive :: (node: *DOM_Node) {
-//     if node.type == .OBJECT || node.type == .ARRAY {
-//         for child: node.children {
-//             delete_child_nodes_recursive(child);
-//             free(child);
-//         }
-//     }
-// }
+delete_child_nodes_recursive :: (node: *DOM_Node) {
+    if node.type == .OBJECT || node.type == .ARRAY {
+        for child: node.children {
+            delete_child_nodes_recursive(child);
+            free(child);
+        }
+    }
+}
 
 // TODO: add ability to index array nodes?
 // relative path only
@@ -256,7 +257,8 @@ remove_node :: (node: *DOM_Node) {
     if node.prev != null          node.prev.next    = node.next;
     if node.parent.children.first == node  node.parent.children.first = node.next;
     if node.parent.children.last  == node  node.parent.children.last  = node.prev;
-    // NOTE: no need to free now that we are using pool for allocating nodes
+    delete_child_nodes_recursive(node);
+    free(node);
 }
 
 
@@ -270,9 +272,9 @@ clone_child_nodes_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
 
 clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {    
     // free child nodes so we can overwrite
-    // if dst.type == .OBJECT {
-    //     delete_child_nodes_recursive(dst);
-    // }
+    if dst.type == .OBJECT {
+        delete_child_nodes_recursive(dst);
+    }
     
     dst.name         = src.name;
     dst.type         = src.type;
