@@ -172,6 +172,11 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
 /*
     Construction of the dom is done iteratively instead of recursively, since we can trivially track the current parent node and retrieve it's parent node when we would otherwise return.
     Although, if we ever remove the pointer to parent from DOM nodes, we may go ahead and just make this recursive.
+    
+    TODO: don't require comma after objects or arrays
+          maybe we can just consume the comma in the lexer as an expression-ending delimiter and then 
+          we can remove the need to even check for it here.
+          Maybe we can even just make the comma be whitespace to GON again?
 */
 construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     dom_root      = New(DOM_Node,, node_allocator);

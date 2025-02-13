@@ -12,5 +12,7 @@ things: {
     "Thing 3": {
         text:       "this is a replacement string",
     }
-}
+},
+
+flags: .second | .third,
 
