@@ -1,7 +1,7 @@
 
-whitespace_chars :: " ,\t\r\n\0";
-reserved_chars   :: "~!@#$%^&*{}[]()\"";
-whitespace_and_reserved_chars :: " ,\t\r\n#{}[]\"\0";
+whitespace_chars :: " \t\r\n\0";
+reserved_chars   :: "~!@#$%^&:*{}[]()\"";
+whitespace_and_reserved_chars :: #run join(whitespace_chars, reserved_chars);
 
 Token :: struct {
     type:       Token_Type;
@@ -14,18 +14,15 @@ Token_Type :: enum u8 {
     ERROR;
     
     STRING;
+    
     OBJECT_BEGIN;
     OBJECT_END;
     ARRAY_BEGIN;
     ARRAY_END;
+    
     REF_INDEX;
     REF_POINTER;
     REF_VALUE;
-    PATH_SPLIT;
-    PATH_HERE;
-    PATH_PARENT;
-    
-    CODE; // basically a string enclosed in ()
 }
 
 Source_Location :: struct {
@@ -98,24 +95,9 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
     is_numeric :: inline (char: u8) -> bool {
         return char >= #char "0" && char <= #char "9";
     }
-    
     is_alpha :: inline (char: u8) -> bool {
         return (char >= #char "a" && char <= #char "z") 
             || (char >= #char "A" && char <= #char "Z");
-    }
-    
-    // tokens only used in path strings, maybe we have a param to skip these when not parsing for a path
-    if file[0] == #char "/" {
-        advance(t);
-        return .{ .PATH_SPLIT, "", src_loc };
-    }
-    
-    // not very correct, but whatever for now
-    if file[0] == #char "." {
-        if advance(t) && file[0] == #char "." {
-            advance(t);
-            return .{ .PATH_PARENT, "", src_loc };
-        }
     }
     
     // string
@@ -134,27 +116,6 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
         advance(t);
         
         return .{ .STRING, string_value, src_loc };
-    }
-    
-    if file[0] == #char "("{ 
-        #if !USING_LEAD_SHEETS {
-            return make_error_token("Unable to parse code expression because Lead Sheets integration is not enabled as a module parameter.");
-        }
-        
-        string_value := string.{ 0, file.data };
-        if !advance(t)  return make_error_token("Unexpected EOF while parsing code expression.");
-        
-        depth := 0;
-        while !(file[0] == #char ")" && depth == 0) {
-            depth += (file[0] == #char "(").(int);
-            depth -= (file[0] == #char ")").(int);
-            string_value.count += 1;
-            if !advance(t)  return make_error_token("Unexpected EOF while parsing code expression.");
-        }
-        advance(t);
-        string_value.count += 2;
-        
-        return .{ .CODE, string_value, src_loc };
     }
     
     // unquoted string

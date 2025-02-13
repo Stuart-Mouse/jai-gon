@@ -13,11 +13,6 @@ Parser :: struct {
     node_pool:          Flat_Pool;
     node_allocator:     Allocator;
     callbacks:          [..] Parser_Callback;
-    
-    #if USING_LEAD_SHEETS {
-        // TODO: could we use just portions of script? will require refactoring LS internals
-        script:         LS.Script;
-    }
 };
 
 init_parser :: (using parser: *Parser, _file: string) {
@@ -73,7 +68,6 @@ validate_node_references :: (using parser: *Parser) -> bool {
         if .REFERENCES_RESOLVED & node.flags  return .COMPLETE;
         
         if node.type == {
-          case .CODE; #through;
           case .FIELD;
             node.flags |= .REFERENCES_RESOLVED;
             return .PROGRESS | .COMPLETE;
@@ -190,14 +184,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
 }
 
 process_data_bindings :: (using parser: *Parser) -> bool {
-    #if USING_LEAD_SHEETS {
-        // TODO: probabl;y move elsewhere. set up befor ethis so that user cna configure script stuffs
-        LS.init_script(*script);
-        LS.register_type(*script, "float", type_info(float));
-    }
-    
     if !process_node_binding(parser, dom_root)  return false;
-    
     return true;
 }
 
@@ -272,80 +259,6 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
           case .VALUE;
             log("ERROR: got a value ref in process_node_binding. This should have already been resolved in validate_node_references.");
             return false;
-        }
-        
-      case .CODE;
-        #if USING_LEAD_SHEETS {
-        if node.data_binding.value_pointer == null {
-            return true;
-        }
-        // TODO: if node does not have data binding?
-        // NOTE: Code expressions are not even parsed and evaluated if they don't have a data binding
-        
-        // we have to reinit lexer for every expression
-        // TODO: set the lexer source location based on dom node?
-        LS.init_lexer(*script.lexer, node.code.text);
-        expr := LS.parse_expression(*parser.script, node.code.text);
-        if expr == null {
-            log("Error: unable to parse expression '%'.", node.code.text);
-            return false;
-        }
-        
-        // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
-        parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
-        
-        walk_proc :: (script: *LS.Script, ast_node: *LS.Node, data: *void) -> (bool, *LS.Node) {
-            using data.(*type_of(parser_and_node));
-            if ast_node.node_type == LS.Node_Identifier {
-                path := ast_node.(*LS.Node_Identifier).name;
-                
-                ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
-                if ref_node == null {
-                    // log("Error: unable to resolve node path '%'.", path);
-                    // NOTE: returning true here so that we still default to normal idnetifier resolution
-                    return true, null; 
-                }
-                
-                if ref_node.data_binding.value_pointer == null {
-                    // TODO: actually handle this case by creating instance of hinted type?
-                    log("Error: node '%' referenced in expression '%' had no data binding!.", path, dom_node.code.text);
-                    return false, null;
-                }
-                
-                // jump to referenced node
-                if !process_node_binding(dom_parser, ref_node) return false, null;
-                
-                literal := LS.alloc_node(script, LS.Node_Literal);
-                literal.literal_type = .ANY;
-                literal.any = ref_node.data_binding;
-                return true, literal;
-            }
-            return true, null;
-        };
-        
-        if !LS.walk_nodes(*script, *expr, walk_proc, *parser_and_node)  return false;
-        
-        expr_value_type := LS.typecheck_node(*script, expr, .IS_STATEMENT_ROOT, node.data_binding.type);
-        if expr_value_type != node.data_binding.type {
-            log("Error: failed to typecheck expression '%'.", node.code.text);
-            return false;
-        }
-        
-        // TEMP DEBUG PRINTING
-        builder: String_Builder;
-        dbg := LS.print_node(*script, expr, *builder, 0);
-        print("%\n", builder_to_string(*builder));
-        
-        value, ok := LS.evaluate_node(*script, expr);
-        if !ok {
-            log("Error: failed to evaluate expression '%'!", node.code.text);
-            return false;
-        }
-        assert(value.type == node.data_binding.type);
-        
-        memcpy(node.data_binding.value_pointer, value.value_pointer, value.type.runtime_size);
-        
-        return true;
         }
     }
     
@@ -441,9 +354,6 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
               case .STRING;
                 type = .FIELD;
                 text = next_token.text;
-              case .CODE;
-                type = .CODE;
-                text = next_token.text;
               case .OBJECT_BEGIN;
                 type = .OBJECT;
               case .ARRAY_BEGIN;
@@ -472,10 +382,6 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 parent = node;
               case .FIELD;
                 node.value = text;
-              case .CODE;
-                #if USING_LEAD_SHEETS {
-                    node.code.text = text;
-                }
             }
         }
     }
@@ -561,8 +467,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 } else {
                     count_before := raw_array.count;
-                    array_reserve_nonpoly(xx raw_array, count_before + node.count, ti_array.element_type.runtime_size);
-                    raw_array.count += node.count;
+                    array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
+                    raw_array.count += node.children.count;
                     for node.children {
                         elem_any := Any.{
                             value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
@@ -592,7 +498,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         add_data_binding_to_node(child, elem_any);
                     }
                 } else {
-                    if node.count > elem_count {
+                    if node.children.count > elem_count {
                         log("Error: too many elements in array.");
                         return false;
                     }
@@ -647,7 +553,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             case .STRUCT;
                 ti_struct := node.data_binding.type.(*Type_Info_Struct);
 
-                if node.count > ti_struct.members.count {
+                if node.children.count > ti_struct.members.count {
                     log("Data binding error: array-type struct contains too many elements.");
                     return false;
                 }
@@ -682,8 +588,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         We won't do this unless we need to though. For now, the current method is fine.
                     */
                     count_before := raw_array.count;
-                    array_reserve_nonpoly(xx raw_array, count_before + node.count, ti_array.element_type.runtime_size);
-                    raw_array.count += node.count;
+                    array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
+                    raw_array.count += node.children.count;
                     for node.children {
                         elem_any := Any.{
                             value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
@@ -693,7 +599,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 } else {
                     elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
-                    if node.count > elem_count {
+                    if node.children.count > elem_count {
                         log("Data binding error: bounds check failed on array or slice.");
                         return false;
                     }
@@ -760,9 +666,6 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             if binding.type.type != .POINTER  return false;
         }
         
-        
-      case .CODE; 
-        // TODO: we probably need extra validation stuff here
         
       case;
         // TODO: invalid node type error?

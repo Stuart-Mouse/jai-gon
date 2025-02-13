@@ -3,17 +3,17 @@
 INDENTATION_STRING :: "    ";
 
 Serializer :: struct {
-    builder       : String_Builder;
-    format        : File_Format;
-    indent        : int;
+    builder:        String_Builder;
+    format:         File_Format;
+    indent:         int;
     
-    dom_root      : *DOM_Node;
-    do_free_nodes : bool;
+    dom_root:       *DOM_Node;
+    do_free_nodes:  bool;
     
     // event_handler : SAX_Event_Handler,
     
     // only used for allocating dom nodes, not used for string builder atm. may store a separate allocator for that
-    allocator     : Allocator; 
+    allocator:      Allocator; 
 }
 
 
@@ -41,7 +41,7 @@ init_serializer :: (serializer: *Serializer, root: *DOM_Node = null, allocator: 
 
 destroy_serializer :: (using serializer: *Serializer) {
     if do_free_nodes {
-        delete_child_nodes_recursive(dom_root);
+        // delete_child_nodes_recursive(dom_root);
         free(dom_root,, allocator);
     }
 }
@@ -54,8 +54,8 @@ serialize :: (using serializer: *Serializer) -> bool {
     
     serialize_proc: #type (using serializer: *Serializer, node: *DOM_Node) -> bool;
     if serializer.format == {
-        case .GON  ; serialize_proc = serialize_dom_nodes_to_gon;
-        // case .JSON ; serialize_proc = serialize_dom_nodes_to_json;
+        case .GON;  serialize_proc = serialize_dom_nodes_to_gon;
+        // case .JSON; serialize_proc = serialize_dom_nodes_to_json;
     }
     
     // manually iterate over root node's children
@@ -97,7 +97,7 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
 
     if node.parent != null {
         in_array       = node.parent.type == .ARRAY;
-        is_first_child = node == node.parent.first;
+        is_first_child = node == node.parent.children.first;
         same_line      = (.SAME_LINE & node.parent.flags).(bool);      // check for sameline on parent, not self (we do that later)
     }
     
@@ -122,62 +122,52 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
     // }
     
     if node.type == {
-        case .OBJECT; #through;
-        case .ARRAY;
-            // ensure that end of object/array gets printed on same line if sameline flag is set on self
-            same_line ||= (.SAME_LINE & node.flags).(bool);
-            
-            is_array := (node.type == .ARRAY);
-            if is_array && node.first && do_sameline_for_type(node.first.data_binding.type) {
-                node.flags |= .SAME_LINE;
-                same_line = true;
+      case .OBJECT; #through;
+      case .ARRAY;
+        // ensure that end of object/array gets printed on same line if sameline flag is set on self
+        same_line ||= (.SAME_LINE & node.flags).(bool);
+        
+        is_array := (node.type == .ARRAY);
+        if is_array && node.children.first && do_sameline_for_type(node.children.first.data_binding.type) {
+            node.flags |= .SAME_LINE;
+            same_line = true;
+        }
+        
+        append(*builder, ifx is_array then "[" else "{");
+        
+        // recurse for children
+        indent += 1;
+        for child: node.children 
+            if !serialize_dom_nodes_to_gon(serializer, child)  
+                then return false;
+        indent -= 1;
+        
+        if same_line {
+            append(*builder, " ");
+        } else {
+            append(*builder, "\n");
+            for 0..indent-1  append(*builder, INDENTATION_STRING);
+        }
+        
+        append(*builder, ifx is_array then "]" else "}");
+        
+      case .FIELD;
+        if node.value == "" {
+            if node.data_binding.value_pointer == null {
+                log("ERROR: no value defined for node '%v'\n", format_node_path(node));
+                return false;
             }
             
-            append(*builder, ifx is_array then "[" else "{");
-            
-            // recurse for children
-            indent += 1;
-            for child: node.children 
-                if !serialize_dom_nodes_to_gon(serializer, child)  
-                    then return false;
-            indent -= 1;
-            
-            if same_line {
-                append(*builder, " ");
-            } else {
-                append(*builder, "\n");
-                for 0..indent-1  append(*builder, INDENTATION_STRING);
-            }
-            
-            append(*builder, ifx is_array then "]" else "}");
-            
-        case .FIELD;
-            if node.value == "" {
-                if node.data_binding.value_pointer == null {
-                    log("ERROR: no value defined for node '%v'\n", format_node_path(node));
-                    return false;
-                }
-                
-                node.value = tprint("%", node.data_binding); // TODO
-            }
-            append(*builder, to_conformant_string(node.value,, allocator = temp));
-            
-        case .CODE;
-            if node.value == "" {
-                if node.code.text == "" {
-                    log("ERROR: empty expression on code node '%v'\n", format_node_path(node));
-                    return false;
-                }
-                node.value = tprint("(%)", node.code.text); // TODO
-            }
-            append(*builder, to_conformant_string(node.value,, allocator = temp));
-            
-        case .REF;
-            if node.ref.type == {
-                case .INDEX   ; print_to_builder(*builder, "%", get_node_index(node.ref.node));
-                case .POINTER ; print_to_builder(*builder, "*\"%\"", node.ref.text);
-                case .VALUE   ; assert(false, "Cannot print a value node."); // should not occur
-            }
+            node.value = tprint("%", node.data_binding); // TODO
+        }
+        append(*builder, to_conformant_string(node.value,, allocator = temp));
+        
+      case .REF;
+        if node.ref.type == {
+            case .INDEX   ; print_to_builder(*builder, "%", get_node_index(node.ref.node));
+            case .POINTER ; print_to_builder(*builder, "*\"%\"", node.ref.text);
+            case .VALUE   ; assert(false, "Cannot print a value node."); // should not occur
+        }
             
     }
     
@@ -251,49 +241,46 @@ determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
     io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
     
     if node.data_binding.type.type == {
-        case .INTEGER; #through;
-        case .FLOAT;   #through;
-        case .STRING;  #through;
-        case .BOOL;  
+      case .INTEGER; #through;
+      case .FLOAT;   #through;
+      case .STRING;  #through;
+      case .BOOL;  
+        return .FIELD;
+        
+      case .ENUM;
+        ti_enum := node.data_binding.type.(*Type_Info_Enum);
+        if !(ti_enum.enum_type_flags & .FLAGS) {
             return .FIELD;
+        }
+        // check if parent data binding is the same.
+        if node.parent && node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
+            return .FIELD;
+        }
+        node.flags |= .SAME_LINE;
+        return .ARRAY;
         
-        case .ENUM;
-            ti_enum := node.data_binding.type.(*Type_Info_Enum);
-            if !(ti_enum.enum_type_flags & .FLAGS) {
-                return .FIELD;
-            }
-            // check if parent data binding is the same.
-            if node.parent && node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
-                return .FIELD;
-            }
-            node.flags |= .SAME_LINE;
-            return .ARRAY;
-        
+      case .ARRAY;
         // arrays of bytes/u8 are serialized as string
         // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
-        case .ARRAY;
-            ti_array := node.data_binding.type.(*Type_Info_Array);
-            if ti_array.element_type.runtime_size == 1 {
-                return .FIELD;
+        ti_array := node.data_binding.type.(*Type_Info_Array);
+        if ti_array.element_type.runtime_size == 1 {
+            return .FIELD;
+        }
+        if io_data {
+            if (.AS_OBJECT     & io_data.serialize.flags) ||
+               (.ARRAY_INDEXED & io_data.serialize.flags) {
+                return .OBJECT;
             }
-            if io_data {
-                if (.AS_OBJECT     & io_data.serialize.flags) ||
-                   (.ARRAY_INDEXED & io_data.serialize.flags) {
-                    return .OBJECT;
-                }
-            }
-            return .ARRAY;
-            
-        case .STRUCT;
-            if io_data {
-                if .AS_ARRAY & io_data.serialize.flags {
-                    return .ARRAY;
-                }
-            }
-            return .OBJECT;
+        }
+        return .ARRAY;
         
-        case;
-            return .INVALID;
+      case .STRUCT;
+        if io_data {
+            if .AS_ARRAY & io_data.serialize.flags {
+                return .ARRAY;
+            }
+        }
+        return .OBJECT;
     }
     
     return .INVALID;
@@ -301,53 +288,39 @@ determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
 
 append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
     if node == null || node.data_binding.value_pointer == null  return;
-
+    
     if node.data_binding.type.type == {
-        case .STRUCT;
-            ti_struct := node.data_binding.type.(*Type_Info_Struct);
-            
-            for ti_struct.members {
-                member_any := Any.{
-                    value_pointer = node.data_binding.value_pointer + it.offset_in_bytes,
-                    type          = it.type,
-                };
-                // figure out whether to prepend elems (will do for things that need to be attrs)
-                append_data_node(node, it.name, member_any);
-            }
-            
-            return;
-            
-        case .ARRAY;
-            ti_array := node.data_binding.type.(*Type_Info_Array);
+      case .STRUCT;
+        ti_struct := node.data_binding.type.(*Type_Info_Struct);
+        for ti_struct.members {
+            member_any := Any.{
+                value_pointer = node.data_binding.value_pointer + it.offset_in_bytes,
+                type          = it.type,
+            };
+            // figure out whether to prepend elems (will do for things that need to be attrs)
+            append_data_node(node, it.name, member_any);
+        }
+        return;
         
-            data       : *void = ---;
-            elem_count : int   = ---;
+      case .ARRAY;
+        ti_array := node.data_binding.type.(*Type_Info_Array);
+    
+        // TODO: use get_array_count_and_data?
+        count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+        if count == 0 || data == null  return;
+        
+        for 0..elem_count-1 {
+            elem_any := Any.{
+                value_pointer = data + (ti_array.element_type.runtime_size * it),
+                type          = ti_array.element_type
+            };
             
-            if ti_array.array_type == .FIXED {
-                data       = node.data_binding.value_pointer;
-                elem_count = ti_array.array_count;
-            } else {
-                raw_array := node.data_binding.value_pointer.(*Resizable_Array);
-                data       = raw_array.data;
-                elem_count = raw_array.count;
-                if elem_count == 0  return; // skip serializing empty dynamic arrays
-            }             
-            
-            if data == null  return;
-
-            for 0..elem_count-1 {
-                elem_any := Any.{
-                    value_pointer = data + (ti_array.element_type.runtime_size * it),
-                    type          = ti_array.element_type
-                };
-                
-                // TODO: as indexed, as object
-                
-                elem_name: string = tprint("%", it);
-                append_data_node(node, elem_name, elem_any);
-            }
-            
-            return;
+            // TODO: as indexed, as object
+            elem_name: string = tprint("%", it);
+            append_data_node(node, elem_name, elem_any);
+        }
+        
+        return;
     }
 }
 
@@ -363,23 +336,20 @@ is_escaped_char :: (char: u8) -> bool {
     return char == #char "\\" || char == #char "\"";
 }
 
-to_conformant_string :: (s: string, force_quotes := false) -> string {
-    if s == ""  return copy_string("\"\"");
+to_conformant_string :: (str: string, force_quotes := false) -> string {
+    if str == ""  return copy_string("\"\"");
     
     sb: String_Builder;
-    
-    write_quotes := force_quotes || (s.count == 0) || find_index_of_any_from_left(s, whitespace_and_reserved_chars) >= 0;
+    write_quotes := force_quotes || (str.count == 0) || find_index_of_any_from_left(str, whitespace_and_reserved_chars) >= 0;
     
     if write_quotes  append(*sb, "\"");
-    
-    for c: s {
-        if c == 0  break;
-        if is_escaped_char(c) {
+    for char: str {
+        if char == 0  break;
+        if is_escaped_char(char) {
             append(*sb, "\\");
         }
-        append(*sb, c);
+        append(*sb, char);
     }
-    
     if write_quotes  append(*sb, "\"");
     
     return builder_to_string(*sb);

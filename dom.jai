@@ -33,7 +33,6 @@ Node_Type :: enum {
     OBJECT  :: 2;
     ARRAY   :: 3;
     REF     :: 4;
-    CODE    :: 5;
 }
 
 // this struct is kinda big
@@ -41,13 +40,11 @@ Node_Type :: enum {
 DOM_Node :: struct {
     parent, next, prev: *DOM_Node;
     
-    // src_loc      : Source_Location;
-    
-    name:   string;
-    type:   Node_Type;
-    flags:  DOM_Node_Flags;
-    
-    data_binding: Any;
+    name:               string;
+    type:               Node_Type;
+    flags:              DOM_Node_Flags;
+    data_binding:       Any;
+    // source_location:    Source_Location;
     
     using content: union {
         ref: struct {
@@ -55,17 +52,8 @@ DOM_Node :: struct {
             node:   *DOM_Node;
             type:   DOM_Node_Ref_Type;
         };
-        
-        value: string;
-        
-        using children: DOM_Node_List;
-        
-        #if USING_LEAD_SHEETS {
-            code: struct {
-                text:       string;
-                statement:  *LS.Node;
-            }
-        }
+        value:      string;
+        children:   DOM_Node_List;
     };
 }
 
@@ -125,35 +113,36 @@ get_node_index :: (node: *DOM_Node) -> int {
 // TODO: add ability to index array nodes?
 // relative path only
 find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
-    t: Tokenizer = .{ file = path };
-    get_token(*t); // TODO: note why?
-    
+    if !path  return node, get_node_index(node);
+    _path := path;
     index := 0;
     while node != null {
-        next := get_next_token_from_path_string(*t);
-        if next.type == .ERROR return null, 0;
-        if next.type == .EOF break;
-        if next.type == .PATH_PARENT { 
-            node = node.parent; 
-            continue;
-        };
-        node, index = find_child_node_by_name(node, next.text);
+        next:, _path = path_next(_path);
+        if next == ".." { 
+            node  = node.parent;
+            index = get_node_index(node);
+        } else {
+            node, index = find_child_node_by_name(node, next);
+        }
+        if !_path  break;
     }
-    
     return node, index;
 }
 
 // relative or absolute path
 find_node_by_path :: (parser: *Parser, node: *DOM_Node, path: string) -> (*DOM_Node, int) {
-    if !path return null, -1;
+    if !path  return node, get_node_index(node);
+    _path := path;
+    if !_path return null, -1;
     search_from_node := node;
-    if path[0] == #char "/" {
-        advance(*path);
+    if _path[0] == #char "/" {
+        advance(*_path);
         search_from_node = parser.dom_root;
     }
-    ret, idx := find_node_by_path(search_from_node, path);
+    ret, idx := find_node_by_path(search_from_node, _path);
     return ret, idx;
 }
+
 
 // will return null if not found
 find_child_node_by_name :: (parent: *DOM_Node, name: string) -> (*DOM_Node, int) {
@@ -190,27 +179,27 @@ append_child_node :: (parent: *DOM_Node, prepend := false) ->  *DOM_Node {
     // if !node return null;
     
     node.parent = parent;
-    parent.count += 1;
+    parent.children.count += 1;
     
     if prepend {
-        if parent.first != null {
-            parent.first.prev = node;
-            node.next = parent.first;
+        if parent.children.first != null {
+            parent.children.first.prev = node;
+            node.next = parent.children.first;
         }
-        parent.first = node;
+        parent.children.first = node;
         
-        if parent.last == null {
-            parent.last = node;
+        if parent.children.last == null {
+            parent.children.last = node;
         }
     } else {
-        if parent.last != null {
-            parent.last.next = node;
-            node.prev = parent.last;
+        if parent.children.last != null {
+            parent.children.last.next = node;
+            node.prev = parent.children.last;
         }
-        parent.last = node;
+        parent.children.last = node;
         
-        if parent.first == null {
-            parent.first = node;
+        if parent.children.first == null {
+            parent.children.first = node;
         }
     }
     
@@ -238,19 +227,12 @@ get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insert
 
 append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend: bool = false) -> *DOM_Node {
     node := parent;
-    
-    t: Tokenizer = .{ file = path };
-    get_token(*t);
-    
+    _path := path;
     while true {
-        next := get_next_token_from_path_string(*t);
-        if next.type == .ERROR  return null;
+        next:, _path = path_next(_path);
+        if !_path  return get_or_add_child_node(node, next, behavior, prepend);
         
-        if peek_token(*t).type == .EOF {
-            return get_or_add_child_node(node, next.text, behavior, prepend);
-        }
-        
-        child := find_child_node_by_name(node, next.text);
+        child := find_child_node_by_name(node, next);
         if child != null {
             if child.type != .OBJECT {
                 return null; // error, we can't create a named subnode on an array or field type node
@@ -260,7 +242,7 @@ append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insert
         }
         
         node      = append_child_node(node, prepend);
-        node.name = next.text;
+        node.name = next;
         node.type = .OBJECT;
     }
     
@@ -269,11 +251,11 @@ append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insert
 }
 
 remove_node :: (node: *DOM_Node) {
-    node.parent.count -= 1;
+    node.parent.children.count -= 1;
     if node.next != null          node.next.prev    = node.prev;
     if node.prev != null          node.prev.next    = node.next;
-    if node.parent.first == node  node.parent.first = node.next;
-    if node.parent.last  == node  node.parent.last  = node.prev;
+    if node.parent.children.first == node  node.parent.children.first = node.next;
+    if node.parent.children.last  == node  node.parent.children.last  = node.prev;
     // NOTE: no need to free now that we are using pool for allocating nodes
 }
 
@@ -319,22 +301,6 @@ clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
     return true;
 }
 
-get_next_token_from_path_string :: (t: *Tokenizer) -> Token {
-    next := get_token_or_return(t, .{ type = .ERROR });
-    
-    if next.type == {
-        case .EOF;
-        case .PATH_PARENT;
-        case .STRING; 
-            // no op
-        case; 
-            return .{ type = .ERROR };
-    }
-    
-    expect_token_type(t, .PATH_SPLIT);
-    return next;
-}
-
 format_node_path :: (node: *DOM_Node) -> string {
     builder: String_Builder;
     init_string_builder(*builder);
@@ -349,3 +315,23 @@ append_node_path_to_string_builder :: (builder: *String_Builder, node: *DOM_Node
     }
     append(builder, node.name);
 }
+
+
+#scope_module
+
+/*
+    Node paths follow essentially the same rules as file paths do on Windows.
+    
+    Instead of using the lexer to incrementally parse path strings, we just use this one procedure which returns the next path token and the remaining string.
+    I was using the lexer for this previously, but in retrospect that was really dumb.
+    
+    The procedure does not currently do anything special to validate the content of the string, but perhaps we should?
+    The caller will also have to check if the path is absolute or relative manually before they start splitting the path.
+*/
+
+path_next :: (path: string) -> (next: string, remaining: string, ok: bool) {
+    found, left, right := split_from_left_by_any(path, "/\\");
+    if !found  return path, "", true;
+    return left, right, true;
+}
+
