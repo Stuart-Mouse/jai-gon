@@ -71,7 +71,7 @@ for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {
         while it {
             prev := it.prev;
             defer { it = prev; it_index -= 1; }
-            #insert(remove={remove_node(it);}) body;
+            #insert(remove={remove_node(it,, `node_allocator);}) body;
         }
     } else {
         `it_index := 0;
@@ -79,7 +79,7 @@ for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {
         while it {
             next := it.next;
             defer { it = next; it_index += 1; }
-            #insert(remove={remove_node(it);}) body;
+            #insert(remove={remove_node(it,, `node_allocator);}) body;
         }
     }
 }

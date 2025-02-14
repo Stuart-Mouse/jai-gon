@@ -11,23 +11,27 @@ Parser :: struct {
     callbacks:          [..] Parser_Callback;
 };
 
-init_parser :: (using parser: *Parser, _file: string) {
-    // reset(*node_pool, overwrite_memory = true);
-    // node_allocator = .{
-    //     data = *node_pool,
-    //     proc = flat_pool_allocator_proc,
-    // };
-    node_allocator = context.allocator;
+init_parser :: (using parser: *Parser, _file: string, use_pool := true) {
+    if use_pool {
+        reset(*node_pool, overwrite_memory = true);
+        node_allocator = .{
+            data = *node_pool,
+            proc = flat_pool_allocator_proc,
+        };
+    } else {
+        node_allocator = context.allocator;
+    }
     tokenizer.file = _file;
     init_tokenizer(*tokenizer);
 }
 
 deinit_parser :: (using parser: *Parser) {
-    // fini(*node_pool);
-    delete_child_nodes_recursive(dom_root);
-    free(dom_root);
+    delete_child_nodes_recursive(dom_root,, node_allocator);
+    free(dom_root,, node_allocator);
     dom_root = null;
-    
+    if node_allocator.data == *node_pool {
+        fini(*node_pool);
+    }
     array_free(callbacks);
 }
 
@@ -126,7 +130,7 @@ validate_node_references :: (using parser: *Parser) -> bool {
                 for child: ref_node.children {
                     dst := find_child_node_by_name(parent, child.name);
                     if dst != null  continue;
-                    dst = append_child_node(parent);
+                    dst = append_child_node(parent,, node_allocator);
                     if !clone_node_recursive(dst, child,, node_allocator)  return .ERROR;
                 }
                 result |= .REMOVE_NODE;
