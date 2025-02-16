@@ -40,10 +40,8 @@ deinit_parser :: (using parser: *Parser) {
 parse_file_to_dom :: (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
-    
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
     if !validate_node_references   (*parser)  return .{}, false;
-    
     return parser, true;
 }
 
@@ -549,85 +547,79 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
     
       case .ARRAY;
         if binding.type.type == {
-            case .ENUM;
-                ti_enum := node.data_binding.type.(*Type_Info_Enum);
-                if !(ti_enum.enum_type_flags & .FLAGS) {
-                    log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
-                    return false;
-                }
-                if node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
-                    return false;
-                }
-                for child: node.children {
-                    add_data_binding_to_node(child, node.data_binding);
-                }
-            
-            case .STRUCT;
-                ti_struct := node.data_binding.type.(*Type_Info_Struct);
-
-                if node.children.count > ti_struct.members.count {
-                    log("Data binding error: array-type struct contains too many elements.");
-                    return false;
-                }
-                for child: node.children {
-                    // TODO: will need to to more work here because of constant struct members
-                    member := ti_struct.members[it_index];
-                    member_any := Any.{
-                        value_pointer = node.data_binding.value_pointer + member.offset_in_bytes,
-                        type          = member.type,
-                    };
-                    add_data_binding_to_node(child, member_any);
-                }
-                
-            case .ARRAY;
-                ti_array := node.data_binding.type.(*Type_Info_Array);
-                
-                if ti_array.array_type == .RESIZABLE {
-                    raw_array := node.data_binding.value_pointer.(*Resizable_Array);
-                    /*
-                        IMPORTANT NOTE: 
-                        
-                        It is critical that the proper amount of space is pre-allocated for the dynamic array 
-                        and that we don't have to realloc when we make data bindings for elements below.
-                        Because if we realloc then that invalidates the pointers in the data bindings that we created
-                        for all previous elements, since those are now pointing to the old locations of each element.
-                        This may prove to be more fragile aspects of the DOM parser in contrast to the SAX implementation.
-                        Because this definitely seems like something that a user could break through a problematic callback procedure.
-                        
-                        We could potentially fix this by changing how we store data bindings.
-                        For array elements, instead of storing a pointer to data, store a pointer to a the base pointer and also element offset.
-                        We could have a node flag to indicate that we should use this scheme instead of the usual one.
-                        We won't do this unless we need to though. For now, the current method is fine.
-                    */
-                    count_before := raw_array.count;
-                    array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
-                    raw_array.count += node.children.count;
-                    for node.children {
-                        elem_any := Any.{
-                            value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
-                            type          = ti_array.element_type
-                        };
-                        add_data_binding_to_node(it, elem_any);
-                    }
-                } else {
-                    elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
-                    if node.children.count > elem_count {
-                        log("Data binding error: bounds check failed on array or slice.");
-                        return false;
-                    }
-                    
-                    for child: node.children {
-                        elem_any := Any.{
-                            value_pointer = data + (ti_array.element_type.runtime_size * it_index),
-                            type          = ti_array.element_type,
-                        };
-                        add_data_binding_to_node(child, elem_any);
-                    }
-                }
-                
-            case;
-                log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
+          case .ENUM;
+            ti_enum := node.data_binding.type.(*Type_Info_Enum);
+            if !(ti_enum.enum_type_flags & .FLAGS) {
+                log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
                 return false;
+            }
+            if node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
+                return false;
+            }
+            for child: node.children {
+                add_data_binding_to_node(child, node.data_binding);
+            }
+        
+          case .STRUCT;
+            ti_struct := node.data_binding.type.(*Type_Info_Struct);
+
+            if node.children.count > ti_struct.members.count {
+                log("Data binding error: array-type struct contains too many elements.");
+                return false;
+            }
+            for child: node.children {
+                // TODO: will need to to more work here because of constant struct members
+                member := ti_struct.members[it_index];
+                member_any := Any.{
+                    value_pointer = node.data_binding.value_pointer + member.offset_in_bytes,
+                    type          = member.type,
+                };
+                add_data_binding_to_node(child, member_any);
+            }
+            
+          case .ARRAY;
+            ti_array := node.data_binding.type.(*Type_Info_Array);
+            
+            if ti_array.array_type == .RESIZABLE {
+                raw_array := node.data_binding.value_pointer.(*Resizable_Array);
+                /*
+                    IMPORTANT NOTE: 
+                    It is critical that the proper amount of space is pre-allocated for the dynamic array 
+                    and that we don't have to realloc when we make data bindings for elements below.
+                    Because if we realloc then that invalidates the pointers in the data bindings that we created
+                    for all previous elements, since those are now pointing to the old locations of each element.
+                    This may prove to be one of the more fragile aspects of the DOM parser in contrast to the SAX implementation,
+                    because this definitely seems like something that a user could break through a problematic callback procedure.
+                */
+                count_before := raw_array.count;
+                array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
+                raw_array.count += node.children.count;
+                for node.children {
+                    elem_any := Any.{
+                        value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
+                        type          = ti_array.element_type
+                    };
+                    add_data_binding_to_node(it, elem_any);
+                }
+            } else {
+                elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+                if node.children.count > elem_count {
+                    log("Data binding error: bounds check failed on array or slice.");
+                    return false;
+                }
+                
+                for child: node.children {
+                    elem_any := Any.{
+                        value_pointer = data + (ti_array.element_type.runtime_size * it_index),
+                        type          = ti_array.element_type,
+                    };
+                    add_data_binding_to_node(child, elem_any);
+                }
+            }
+            
+          case;
+            log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
+            return false;
         }
         
 
