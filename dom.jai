@@ -244,7 +244,7 @@ remove_node :: (node: *DOM_Node) {
     if node.prev != null          node.prev.next    = node.next;
     if node.parent.children.first == node  node.parent.children.first = node.next;
     if node.parent.children.last  == node  node.parent.children.last  = node.prev;
-    // NOTE: no need to free now that we are using pool for allocating nodes
+    free(node);
 }
 
 

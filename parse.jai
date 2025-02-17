@@ -8,6 +8,7 @@ Parser :: struct {
     node_pool:          Flat_Pool;
     node_allocator:     Allocator;
     callbacks:          [..] Parser_Callback;
+    using_pool:         bool;
     
     // state pulled out from lexer
     file:               string;
@@ -17,13 +18,17 @@ Parser :: struct {
     script:             LS.Script;
 };
 
-init_parser :: (parser: *Parser, file: string) {
-    // reset(*parser.node_pool, overwrite_memory = true);
-    // parser.node_allocator = .{
-    //     data = *parser.node_pool,
-    //     proc = flat_pool_allocator_proc,
-    // };
-    parser.node_allocator = context.allocator;
+init_parser :: (parser: *Parser, file: string, use_pool := false) {
+    if use_pool {
+        reset(*parser.node_pool, overwrite_memory = true);
+        parser.node_allocator = .{
+            data = *parser.node_pool,
+            proc = flat_pool_allocator_proc,
+        };
+        parser.using_pool = true;
+    }
+    else parser.node_allocator = context.allocator;
+    
     parser.file = file;
     
     LS.init_script(*parser.script);
@@ -34,9 +39,12 @@ init_parser :: (parser: *Parser, file: string) {
 }
 
 deinit_parser :: (using parser: *Parser) {
-    // fini(*node_pool);
-    delete_child_nodes_recursive(dom_root);
-    free(dom_root);
+    if parser.using_pool {
+        fini(*node_pool);
+    } else {
+        delete_child_nodes_recursive(dom_root,, parser.node_allocator);
+        free(dom_root,, parser.node_allocator);
+    }
     dom_root = null;
     
     array_free(callbacks);
