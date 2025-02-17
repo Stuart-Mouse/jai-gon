@@ -43,7 +43,7 @@ DOM_Node :: struct {
     type:               Node_Type;
     flags:              DOM_Node_Flags;
     data_binding:       Any;
-    // source_location:    Source_Location;
+    source_location:    Source_Location;
     
     using content: union {
         expr:           *LS.Node;
@@ -95,14 +95,14 @@ get_node_index :: (node: *DOM_Node) -> int {
 }
 
 // does not delete the passed node or its neighbors, only children
-// delete_child_nodes_recursive :: (node: *DOM_Node) {
-//     if node.type == .OBJECT || node.type == .ARRAY {
-//         for child: node.children {
-//             delete_child_nodes_recursive(child);
-//             free(child);
-//         }
-//     }
-// }
+delete_child_nodes_recursive :: (node: *DOM_Node) {
+    if node.type == .OBJECT || node.type == .ARRAY {
+        for child: node.children {
+            delete_child_nodes_recursive(child);
+            free(child);
+        }
+    }
+}
 
 // TODO: add ability to index array nodes?
 // relative path only
@@ -258,9 +258,9 @@ clone_child_nodes_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
 
 clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {    
     // free child nodes so we can overwrite
-    // if dst.type == .OBJECT {
-    //     delete_child_nodes_recursive(dst);
-    // }
+    if dst.type == .OBJECT {
+        delete_child_nodes_recursive(dst);
+    }
     
     dst.name         = src.name;
     dst.type         = src.type;

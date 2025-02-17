@@ -2,10 +2,6 @@
 
 Parser_Callback :: #type (*DOM_Node) -> bool;
 
-// Parser_Flags :: enum_flags {
-//     SKIP_PATHS_WITHOUT_BINDINGS;
-// };
-
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     dom_root:           *DOM_Node;
@@ -22,11 +18,12 @@ Parser :: struct {
 };
 
 init_parser :: (parser: *Parser, file: string) {
-    reset(*parser.node_pool, overwrite_memory = true);
-    parser.node_allocator = .{
-        data = *parser.node_pool,
-        proc = flat_pool_allocator_proc,
-    };
+    // reset(*parser.node_pool, overwrite_memory = true);
+    // parser.node_allocator = .{
+    //     data = *parser.node_pool,
+    //     proc = flat_pool_allocator_proc,
+    // };
+    parser.node_allocator = context.allocator;
     parser.file = file;
     
     LS.init_script(*parser.script);
@@ -37,10 +34,14 @@ init_parser :: (parser: *Parser, file: string) {
 }
 
 deinit_parser :: (using parser: *Parser) {
-    fini(*node_pool);
+    // fini(*node_pool);
+    delete_child_nodes_recursive(dom_root);
+    free(dom_root);
     dom_root = null;
     
     array_free(callbacks);
+    
+    LS.free_script(*parser.script);
 }
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
@@ -76,7 +77,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
     // We set BINDING_RESOLVED on exit in any case, since we only process each node once, 
     //      and it either succeeds or everything fails.
     if .BINDING_RESOLVED & node.flags {
-        log("Info: node '%' was already resolved.", format_node_path(node));
+        log("Info: node '%' was already resolved.", format_node_path(node,, temp));
         return true;
     }
     defer node.flags |= .BINDING_RESOLVED; 
@@ -85,7 +86,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
     //      so that we know if we visit it again, we have gone in a loop.
     // TODO: would be better if we explicitly track the dependency chain so that we can print a better error here
     if node.flags & .PENDING_DEPENDENCY {
-        log("Error: cyclic dependency on node '%'.", format_node_path(node));
+        log("Error: cyclic dependency on node '%'.", format_node_path(node,, temp));
         return false;
     }
     node.flags |= .PENDING_DEPENDENCY;
@@ -107,7 +108,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             return true;
         }
         
-        print("%\n", format_node_path(node));
+        print("%\n", format_node_path(node,, temp));
         
         // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
         parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
@@ -152,7 +153,9 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         // TEMP DEBUG PRINTING
         builder: String_Builder;
         dbg := LS.print_node(*script, node.expr, *builder, 0);
-        print("%\n", builder_to_string(*builder));
+        str := builder_to_string(*builder);
+        defer free(str);
+        print("%\n", str);
         
         value, ok := LS.evaluate_node(*script, node.expr);
         if !ok {
@@ -192,6 +195,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         name:   string;
         expr:   *LS.Node;
         type:   Node_Type;
+        name_location:  Source_Location;
         
         // NOTE: Unlike JSON, we don't enforce that there is NOT a trailing comma after the last field in a scope
         if !first_child {
@@ -206,7 +210,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
               case .ARRAY_END;      #through;
               case .EOF;            parser.file = _file; // put the token back manually
               case;
-                log("GON parse error: Expected comma or end of scope after field value, got % \"%\" at (%:%).", next_token.type, next_token.text, next_token.src_loc.line, next_token.src_loc.char);
+                log("GON parse error: Expected comma or end of scope after field value, got % \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                 return false;
             }
         }
@@ -218,6 +222,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             if next_token.type == {
               case .STRING;
                 name = next_token.text;
+                name_location = next_token.location;
                 
               case .EOF;
                 if parent != dom_root {
@@ -277,6 +282,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         node := append_child_node(parent,, node_allocator);
         node.name  = name;
         node.type  = type;
+        node.source_location = ifx name then name_location else next_token.location;
         if node.type == {
           case .OBJECT; #through;
           case .ARRAY;
@@ -422,7 +428,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 }
             }
-
+            
             /* 
                 TODO: 
                 GON objects can only validly be bound to arrays when the element type is a struct,
@@ -435,14 +441,13 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
             return false;
         }
-    
-    
+        
       case .ARRAY;
         if binding.type.type == {
             case .ENUM;
                 ti_enum := node.data_binding.type.(*Type_Info_Enum);
                 if !(ti_enum.enum_type_flags & .FLAGS) {
-                    log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
+                    log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node,, temp));
                     return false;
                 }
                 if node.parent.data_binding.value_pointer == node.data_binding.value_pointer {

@@ -27,7 +27,7 @@ Token :: struct {
         text:   string;
         expr:   *LS.Node;
     }
-    src_loc:    Source_Location;
+    location:    Source_Location;
 }
 
 Token_Type :: enum u8 {
@@ -59,19 +59,19 @@ is_numeric :: inline (char: u8) -> bool {
 lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
     if !skip_whitespace_and_comments(p)  return .{ type = .EOF };
     
-    src_loc := cursor_location;
+    location := cursor_location;
     make_error_token :: (error_string: string = "") -> Token #expand { 
-        return .{ type = .ERROR, src_loc = src_loc, text = error_string }; 
+        return .{ type = .ERROR, location = location, text = error_string }; 
     }
     
     // single character tokens, structural
     if file[0] == {
-      case #char "{";  advance(p);  return .{ type = .OBJECT_BEGIN, text = "{", src_loc = src_loc };
-      case #char "}";  advance(p);  return .{ type = .OBJECT_END,   text = "}", src_loc = src_loc };
-      case #char "[";  advance(p);  return .{ type = .ARRAY_BEGIN,  text = "[", src_loc = src_loc };
-      case #char "]";  advance(p);  return .{ type = .ARRAY_END,    text = "]", src_loc = src_loc };
-      case #char ":";  advance(p);  return .{ type = .COLON,        text = ":", src_loc = src_loc };
-      case #char ",";  advance(p);  return .{ type = .COMMA,        text = ",", src_loc = src_loc };
+      case #char "{";  advance(p);  return .{ type = .OBJECT_BEGIN, text = "{", location = location };
+      case #char "}";  advance(p);  return .{ type = .OBJECT_END,   text = "}", location = location };
+      case #char "[";  advance(p);  return .{ type = .ARRAY_BEGIN,  text = "[", location = location };
+      case #char "]";  advance(p);  return .{ type = .ARRAY_END,    text = "]", location = location };
+      case #char ":";  advance(p);  return .{ type = .COLON,        text = ":", location = location };
+      case #char ",";  advance(p);  return .{ type = .COMMA,        text = ",", location = location };
     }
     
     if expect_expression {
@@ -79,7 +79,7 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
         if node != null {
             assert(cursor != null);
             advance(p, cursor - file.data);
-            return .{ type = .EXPRESSION, expr = node, src_loc = src_loc };
+            return .{ type = .EXPRESSION, expr = node, location = location };
         }
     } else {
         // parse a field name
@@ -96,7 +96,7 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
                 if !advance(p, adv)  return make_error_token("Unexpected EOF while parsing string.");
             }
             advance(p);
-            return .{ type = .STRING, text = string_value, src_loc = src_loc };
+            return .{ type = .STRING, text = string_value, location = location };
         }
         
         // without quotes
@@ -106,7 +106,7 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
                 string_value.count += 1;
                 if !advance(p)  break;
             }
-            return .{ type = .STRING, text = string_value, src_loc = src_loc };
+            return .{ type = .STRING, text = string_value, location = location };
         }
     }
     
