@@ -37,7 +37,7 @@ deinit_parser :: (using parser: *Parser) {
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
 // after calling this, you can just add your data bindings and then process them
-parse_file_to_dom :: (file: string) -> (Parser, bool) {
+parse_file_to_dom :: inline (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom_from_gon_file(*parser)  return .{}, false;

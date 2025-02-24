@@ -158,6 +158,7 @@ find_child_node_by_name :: (parent: *DOM_Node, name: string) -> (*DOM_Node, int)
     return null, -1;
 }
 
+// NOTE: currently only used in serialization
 append_data_node :: (parent: *DOM_Node, path: string, data_binding: Any, prepend: bool = false) ->  *DOM_Node {    
     node := append_node_with_path(parent, path, prepend = prepend);
     if node == null  return node;
