@@ -254,7 +254,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             
             next_token = lex_next_token(parser);
             if next_token.type != .COLON {
-                log("GON parse error: Expected colon after field name, got % \"%\".", next_token.type, next_token.text);
+                log("GON parse error: Expected colon after field name '%', got % \"%\" @ (%:%)", name, next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                 return false;
             }
         }
