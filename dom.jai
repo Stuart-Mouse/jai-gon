@@ -97,9 +97,9 @@ get_node_index :: (node: *DOM_Node) -> int {
 // does not delete the passed node or its neighbors, only children
 delete_child_nodes_recursive :: (node: *DOM_Node) {
     if node.type == .OBJECT || node.type == .ARRAY {
-        for child: node.children {
-            delete_child_nodes_recursive(child);
-            free(child);
+        for node.children {
+            delete_child_nodes_recursive(it);
+            free(it);
         }
     }
 }

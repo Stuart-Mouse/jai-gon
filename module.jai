@@ -67,8 +67,8 @@ set_value_from_string :: (any: Any, text: string) -> bool {
             
         case .STRING;
             // TODO: add conditional logic to NOT copy string if desired
-            any.value_pointer.(*string).* = text;  
-            // any.value_pointer.(*string).* = copy_string(text);  
+            // any.value_pointer.(*string).* = text;  
+            any.value_pointer.(*string).* = copy_string(text);  
   
         case .ENUM;
             enum_type := any.type.(*Type_Info_Enum);  
@@ -200,7 +200,7 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 
 #import "Data_Packer";
 
-LS :: #import "Lead_Sheets"(DEBUG=true);
+LS :: #import "Lead_Sheets"(DEBUG = false);
 
 #load "dom.jai";
 #load "parse.jai";

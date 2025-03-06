@@ -312,30 +312,51 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
         log("Error, node already has a data binding set...");
         return false;
     }
-    node.data_binding = binding;
     
-    // If we re-implement the below code, we will need to update all the places below where we use binding instead of node.binding...
-    // binding, _ = deref_any_pointer(binding)
+    node.data_binding = binding;
+    name_member: *Type_Info_Struct_Member;
+    name_member_any: Any;
+    
+    io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+    if io_data {
+        // because we may rebind the node, we need to assign the name_member_any
+        // if this Any is still set after making bindings to child nodes, then we will assign to it
+        name_member = io_data.name_member;
+        name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
+        
+        if io_data.parse.bind_proc {
+            print("remapping binding on node %\n", format_node_path(node,, temp));
+            node.data_binding = io_data.parse.bind_proc(node.data_binding);
+            if node.data_binding.value_pointer == null {
+                log("Error, bind_proc() returned null.");
+                return false;
+            }
+            // get new io data for new binding
+            io_data = table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+        }
+    }
+    
+    defer if name_member {
+        if !set_value_from_string(name_member_any, node.name) {
+            return false;
+        }
+    }
+    
+    // TODO: think about whether we want to reimplement this functionality
+    // node.data_binding = deref_any_pointer(node.data_binding);
     
     // make indirect bindings onto child nodes
     if node.type == {
       case .OBJECT;
-        for child: node.children {
-            if .BIND_PARENT & child.flags { // necessarily a value ref
-                child.data_binding = node.data_binding;
-            }
-        }
-        
-        if binding.type.type == {
+        if node.data_binding.type.type == {
           case .STRUCT;
-            io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
-        
+            
             for child: node.children {
                 member := get_field(xx node.data_binding.type, child.name);
-                if !member  continue; // TODO: also check that member is non constant
+                if !member || (member.flags & .CONSTANT)  continue;
                 
-                if io_data && io_data.name_member == member 
-                    then node.flags |= .DONT_ASSIGN_NAME;
+                // we don't want to set it if the name member has a binding to a child node
+                if member == name_member then name_member = null;
                 
                 member_any := Any.{
                     value_pointer = node.data_binding.value_pointer + member.offset_in_bytes,
@@ -344,23 +365,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 add_data_binding_to_node(child, member_any);
             }
             
-            // TODO: either just make this a condition for the below directly or set this flag from parent...
-            if node.parent && (node.parent.flags & .ARRAY_INDEXED)
-                then node.flags |= .DONT_ASSIGN_NAME;
-            
             // we don't want to set the name member if the parent exists and is an indexed array, because then the gon name is being used for the index
-            // we also don't want to set it if the name member has a binding to a child node
-            if !(node.flags & .DONT_ASSIGN_NAME) {
-                if io_data && io_data.name_member {
-                    member_any := Any.{
-                        value_pointer = node.data_binding.value_pointer + io_data.name_member.offset_in_bytes,
-                        type          = io_data.name_member.type,
-                    };
-                    if !set_value_from_string(member_any, node.name) {
-                        return false;
-                    }
-                }
-            }
+            if node.parent && (node.parent.flags & .ARRAY_INDEXED) then name_member = null;
             
             
           case .ARRAY;
@@ -446,12 +452,12 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             */
             
           case;
-            log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
+            log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, format_node_path(node,, temp));
             return false;
         }
         
       case .ARRAY;
-        if binding.type.type == {
+        if node.data_binding.type.type == {
             case .ENUM;
                 ti_enum := node.data_binding.type.(*Type_Info_Enum);
                 if !(ti_enum.enum_type_flags & .FLAGS) {
@@ -484,8 +490,12 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 
             case .ARRAY;
                 ti_array := node.data_binding.type.(*Type_Info_Array);
+                data:  *void;
+                count: int;
+                count_before: int; // for dynamic array case, where we want to leave the existing items untouched
                 
-                if ti_array.array_type == .RESIZABLE {
+                if ti_array.array_type == {
+                  case .RESIZABLE;
                     raw_array := node.data_binding.value_pointer.(*Resizable_Array);
                     /*
                         IMPORTANT NOTE: 
@@ -502,30 +512,43 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         We could have a node flag to indicate that we should use this scheme instead of the usual one.
                         We won't do this unless we need to though. For now, the current method is fine.
                     */
-                    count_before := raw_array.count;
+                    count_before = raw_array.count;
                     array_reserve_nonpoly(xx raw_array, count_before + node.children.count, ti_array.element_type.runtime_size);
                     raw_array.count += node.children.count;
-                    for node.children {
-                        elem_any := Any.{
-                            value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
-                            type          = ti_array.element_type
-                        };
-                        add_data_binding_to_node(it, elem_any);
-                    }
-                } else {
-                    elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
-                    if node.children.count > elem_count {
-                        log("Data binding error: bounds check failed on array or slice.");
+                    
+                    data  = raw_array.data;
+                    count = raw_array.count;
+                    
+                  case .VIEW;
+                    raw_array := node.data_binding.value_pointer.(*Array_View_64);
+                    
+                    // count_before = raw_array.count;
+                    // raw_array.count += node.children.count;
+                    // raw_array.data   = realloc(raw_array.data, ti_array.element_type.runtime_size * raw_array.count, ti_array.element_type.runtime_size * count_before);
+                    
+                    print("context.allocator is % @  %.\n", context.allocator, #location());
+                    raw_array.count = node.children.count;
+                    raw_array.data  = alloc(ti_array.element_type.runtime_size * raw_array.count);
+                    print("address of allocated data is % @  %.\n", raw_array.data, #location());
+                    
+                    data  = raw_array.data;
+                    count = raw_array.count;
+                    
+                  case .FIXED;
+                    data  = node.data_binding.value_pointer;
+                    count = ti_array.array_count;
+                    if node.children.count > count {
+                        log("Data binding error: bounds check failed on fixed-size array.");
                         return false;
                     }
-                    
-                    for child: node.children {
-                        elem_any := Any.{
-                            value_pointer = data + (ti_array.element_type.runtime_size * it_index),
-                            type          = ti_array.element_type,
-                        };
-                        add_data_binding_to_node(child, elem_any);
-                    }
+                }
+                
+                for node.children {
+                    elem_any := Any.{
+                        value_pointer = data + (ti_array.element_type.runtime_size * it_index),
+                        type          = ti_array.element_type,
+                    };
+                    add_data_binding_to_node(it, elem_any);
                 }
                 
             case;
@@ -556,7 +579,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
         // TODO: permit structs which have custom parsing procedures defined
         
           case;
-            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
+            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, format_node_path(node,, temp));
             return false;
         }
 
