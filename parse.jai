@@ -30,9 +30,13 @@ init_parser :: (parser: *Parser, file: string, use_pool := false) {
     else parser.node_allocator = context.allocator;
     
     parser.file = file;
+    parser.cursor_location = .{ 1, 1 };
     
     LS.init_script(*parser.script);
     print("allocator: %\n", parser.script.allocator);
+    // LS.register_procedure(*parser.script, "$", (node: *DOM_Node) -> Any { return node.data_binding; });
+    // LS.register_procedure(*parser.script, "&", (node: *DOM_Node) -> Any { return get_node_index(node); });
+    // LS.register_procedure(*parser.script, "*", (node: *DOM_Node) -> Any { return node.data_binding; });
     
     // TODO: move this elsewhere, this is just for testing
     LS.register_common_types(*parser.script); 
@@ -123,8 +127,19 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         
         walk_proc :: (script: *LS.Script, ast_node: *LS.Node, data: *void) -> (bool, *LS.Node) {
             using data.(*type_of(parser_and_node));
-            if ast_node.node_type == LS.Node_Identifier {
-                path := ast_node.(*LS.Node_Identifier).name;
+            
+            // @Hack: in order to make node ref operators work, they're currently just assuming that any instance of the following unary operators where the operand is an identifier is a node ref operator
+            if ast_node.node_type == LS.Node_Operation {
+                operation := ast_node.(*LS.Node_Operation);
+                if operation.operator_type != .UNARY
+                || operation.left.node_type != LS.Node_Identifier 
+                || operation.name.count != 1
+                || !is_any(operation.name[0], "$&") { // TODO: add back in `*` later
+                    return true, null;
+                }
+                
+                path := operation.left.(*LS.Node_Identifier).name;
+                print("path: %, %", path.data, path.count);
                 
                 ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
                 if ref_node == null {
@@ -142,10 +157,17 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
                 // jump to referenced node
                 if !process_node_binding(dom_parser, ref_node) return false, null;
                 
-                literal := LS.alloc_node(script, LS.Node_Literal);
-                literal.literal_type = .ANY;
-                literal.any = ref_node.data_binding;
-                return true, literal;
+                if operation.name == {
+                  case "$"; 
+                    literal := LS.alloc_node(script, LS.Node_Literal);
+                    literal.literal_type = .ANY;
+                    literal.any = ref_node.data_binding;
+                    return true, literal;
+                    
+                  case "&"; 
+                    return true, LS.make_number_literal(script, get_node_index(ref_node).(float64));
+                  // case "*"; literal.any = ref_node.data_binding; // more work needed to make pointer ref work I think...
+                }
             }
             return true, null;
         };
@@ -234,21 +256,21 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 
               case .EOF;
                 if parent != dom_root {
-                    log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                    log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                     return false;
                 }
                 break L_Loop;
                 
               case .OBJECT_END;
                 if parent.type != .OBJECT {
-                    log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                    log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                     return false;
                 }
                 parent = parent.parent;
                 continue;
                 
               case;
-                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                 return false;
             }
             
@@ -274,14 +296,14 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             
           case .ARRAY_END;
             if parent.type != .ARRAY {
-                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
                 return false;
             }
             parent = parent.parent;
             continue;
             
           case;
-            log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+            log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line, next_token.location.char);
             return false;
         }
         

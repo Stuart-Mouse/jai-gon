@@ -19,7 +19,13 @@ Flags :: enum_flags {
 main :: () {
     {
         things: [..] Thing;
-        defer array_free(things);
+        defer {
+            for *things {
+                // free(it.text);
+                free(it.name);
+            }
+            array_free(things);
+        }
         flags: Flags;
 
         io_data := table_add(*IO_Data_Lookup, type_info(Thing), .{

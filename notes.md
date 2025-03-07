@@ -308,3 +308,24 @@ even if we use normal identifiers and subscripting to navigate the dom in value 
     
     
 
+
+
+
+
+## Field ref operators in LSD
+
+for this we want ot implement an operator that is actually aware of node type instead of just value type
+but this is not currently supported....
+
+could return value type of `DOM_Node` when resolving identifier
+    but then we can't just use the data binding directly...
+    we would need some operator to get the data binding as well, which we *could* do with `$` or something
+        i don't exactly like that, but it may be the easiest option
+    this is probably the way to go for now until I hav ebetter options
+    we would need to be able to resolve some operators as if they were directives,
+        and I don't want to do that unitl I fix and refactor directives anyhow
+        
+
+we can't exactly use normal operator overloading for this because that would give us the data bindings with a value type of Any, which we don't want.
+
+so for now we will actually just have to walk nodes and really hack the operators and force resolve them to the dom node operators we need
