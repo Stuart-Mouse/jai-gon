@@ -40,12 +40,9 @@ Parse_Flags :: enum_flags {
 }
 
 Parse_Settings :: struct {
-    flags      : Parse_Flags;
-    
-    // remap a data binding (e.g. struct to only one member) 
-    // maybe later, we actually expand this to allow user to create the nodes manually
-    bind_proc  : #type (Any) -> Any;
-    parse_proc : #type (value: Any, text: string) -> bool;
+    flags:      Parse_Flags;
+    bind_proc:  #type (Any) -> Any;
+    parse_proc: #type (value: Any, text: string) -> bool;
 }
 
 
@@ -64,7 +61,7 @@ IO_Data :: struct {
     
     // for arrays only
     // can be used to index any array using an enum name
-    enum_index_type:    *Type_Info;
+    enum_index_type:    *Type_Info_Enum;
 }
 
 IO_Data_Lookup: Table(*Type_Info, IO_Data);

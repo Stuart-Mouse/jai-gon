@@ -344,7 +344,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
         name_member = io_data.name_member;
-        name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
+        if name_member then name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
         
         if io_data.parse.bind_proc {
             print("remapping binding on node %\n", format_node_path(node,, temp));
@@ -394,20 +394,23 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
           case .ARRAY;
             ti_array := node.data_binding.type.(*Type_Info_Array);
             
-            io_data  := table_find_pointer(*IO_Data_Lookup, ti_array.element_type);
+            io_data  := table_find_pointer(*IO_Data_Lookup, ti_array);
             if io_data && (.ARRAY_INDEXED & io_data.parse.flags)
                 then node.flags |= .ARRAY_INDEXED;
-            else if ti_array.element_type.type == .STRUCT 
-                then node.flags |= .ARRAY_AS_OBJECT;
-                        
+            // else if ti_array.element_type.type == .STRUCT 
+            //     then node.flags |= .ARRAY_AS_OBJECT;
+            
             if ti_array.array_type == .RESIZABLE {
                 raw_array := node.data_binding.value_pointer.(*Resizable_Array);
 
                 if .ARRAY_INDEXED & node.flags {
-                    for child: node.children {
-                        elem_index := to_integer(child.name);
+                    for node.children {
+                        elem_index := -1;
+                        if io_data.enum_index_type 
+                            then elem_index = enum_name_to_value(xx io_data.enum_index_type, it.name);
+                            else elem_index = to_integer(it.name);
                         elem_any   := array_add_any_at_index(node.data_binding, elem_index);
-                        add_data_binding_to_node(child, elem_any);
+                        add_data_binding_to_node(it, elem_any);
                     }
                 } else {
                     count_before := raw_array.count;
@@ -421,25 +424,25 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         add_data_binding_to_node(it, elem_any);
                     }
                 }
-            } else { // .ARRAY and .VIEW
+            } else { // .FIXED and .VIEW
                 io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
 
                 elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
                 
-                if io_data && (.ARRAY_INDEXED & io_data.parse.flags) {
-                    node.flags |= .ARRAY_INDEXED;
-                    for child: node.children {
-                        elem_index := to_integer(child.name); // TODO: add error handling?
-                        if elem_index >= elem_count {
+                if .ARRAY_INDEXED & node.flags {
+                    for node.children {
+                        elem_index := -1;
+                        if io_data.enum_index_type 
+                            then elem_index = enum_name_to_value(xx io_data.enum_index_type, it.name);
+                            else elem_index = to_integer(it.name);
+                        
+                        if elem_index < 0 || elem_index >= elem_count {
                             log("Error: array index is out of bounds.");
                             return false;
                         }
                         
-                        elem_any := Any.{
-                            value_pointer = data + (ti_array.element_type.runtime_size * elem_index),
-                            type          = ti_array.element_type,
-                        };
-                        add_data_binding_to_node(child, elem_any);
+                        elem_any := Any.{ ti_array.element_type, data + (ti_array.element_type.runtime_size * elem_index) };
+                        add_data_binding_to_node(it, elem_any);
                     }
                 } else {
                     if node.children.count > elem_count {
@@ -456,10 +459,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                     
                     for child: node.children {
-                        elem_any := Any.{
-                            value_pointer = data + (ti_array.element_type.runtime_size * it_index),
-                            type          = ti_array.element_type,
-                        };
+                        elem_any := Any.{ ti_array.element_type, data + (ti_array.element_type.runtime_size * it_index) };
                         add_data_binding_to_node(child, elem_any);
                     }
                 }
@@ -612,5 +612,19 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
     return true;
 }
 
+#scope_module
 
 as_type :: inline (ti: *Type_Info) -> Type { return (cast(*Type)*ti).*; }
+
+
+enum_name_to_value :: (ti: *Type_Info_Enum, name: string) -> s64, bool {
+    assert(ti.type == .ENUM);
+    for ti.names  if name == it  return ti.values[it_index], true;
+    return 0, false;
+}
+
+enum_value_to_name :: (ti: *Type_Info_Enum, value: s64) -> string {
+    assert(ti.type == .ENUM);
+    for ti.values  if value == it  return ti.names[it_index];
+    return "";
+}
