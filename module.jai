@@ -124,7 +124,7 @@ set_value_from_string :: (any: Any, text: string) -> bool {
 array_add_any :: inline (array: Any) -> Any, bool {
     // verify that array is in fact an array
     if array.type.type != .ARRAY {
-        print("Array any is not an array!\n");
+        log("Error: Array any is not an array!\n");
         return Any.{}, false;
     }
     ti_array := array.type.(*Type_Info_Array);

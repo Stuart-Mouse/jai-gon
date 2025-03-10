@@ -89,7 +89,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
     // We set BINDING_RESOLVED on exit in any case, since we only process each node once, 
     //      and it either succeeds or everything fails.
     if .BINDING_RESOLVED & node.flags {
-        log("Info: node '%' was already resolved.", format_node_path(node,, temp));
+        // log("Info: node '%' was already resolved.", format_node_path(node,, temp));
         return true;
     }
     defer node.flags |= .BINDING_RESOLVED; 
@@ -120,7 +120,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
             return true;
         }
         
-        print("%\n", format_node_path(node,, temp));
+        // print("%\n", format_node_path(node,, temp));
         
         // used for walk_nodes callback, so that we can search for nodes from relative or absolute path
         parser_and_node: struct { dom_parser: *Parser; dom_node: *DOM_Node; } = .{ parser, node };
@@ -139,7 +139,7 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
                 }
                 
                 path := operation.left.(*LS.Node_Identifier).name;
-                print("path: %, %", path.data, path.count);
+                // print("path: %, %", path.data, path.count);
                 
                 ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
                 if ref_node == null {
@@ -181,11 +181,11 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         }
         
         // TEMP DEBUG PRINTING
-        builder: String_Builder;
-        dbg := LS.print_node(*script, node.expr, *builder, 0);
-        str := builder_to_string(*builder);
-        defer free(str);
-        print("%\n", str);
+        // builder: String_Builder;
+        // dbg := LS.print_node(*script, node.expr, *builder, 0);
+        // str := builder_to_string(*builder);
+        // defer free(str);
+        // print("%\n", str);
         
         value, ok := LS.evaluate_node(*script, node.expr);
         if !ok {
@@ -347,7 +347,6 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
         if name_member then name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
         
         if io_data.parse.bind_proc {
-            print("remapping binding on node %\n", format_node_path(node,, temp));
             node.data_binding = io_data.parse.bind_proc(node.data_binding);
             if node.data_binding.value_pointer == null {
                 log("Error, bind_proc() returned null.");
@@ -397,6 +396,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
             io_data  := table_find_pointer(*IO_Data_Lookup, ti_array);
             if io_data && (.ARRAY_INDEXED & io_data.parse.flags)
                 then node.flags |= .ARRAY_INDEXED;
+                
+            // TODO: I have no idea what the below logic was originally intended to do...
             // else if ti_array.element_type.type == .STRUCT 
             //     then node.flags |= .ARRAY_AS_OBJECT;
             
@@ -548,10 +549,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     // raw_array.count += node.children.count;
                     // raw_array.data   = realloc(raw_array.data, ti_array.element_type.runtime_size * raw_array.count, ti_array.element_type.runtime_size * count_before);
                     
-                    print("context.allocator is % @  %.\n", context.allocator, #location());
                     raw_array.count = node.children.count;
                     raw_array.data  = alloc(ti_array.element_type.runtime_size * raw_array.count);
-                    print("address of allocated data is % @  %.\n", raw_array.data, #location());
                     
                     data  = raw_array.data;
                     count = raw_array.count;
@@ -578,32 +577,33 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 return false;
         }
         
-
-      case .FIELD;
-        if node.data_binding.type.type == {
-          case .INTEGER;
-          case .BOOL;
-          case .FLOAT;
-          case .STRING;
-          case .ENUM;
-            // For enum flags, both the enclosing array and the individual elements have the same binding
-            // For fields, we must verify that the parent binding is the same as the field binding
-            ti_enum := node.data_binding.type.(*Type_Info_Enum);
-            if (ti_enum.enum_type_flags & .FLAGS) 
-            && node.parent.data_binding.value_pointer != node.data_binding.value_pointer
-                return false;
+        // TODO: the below logic was presumably here just for typechecking on what gets bound to a gon field, but now we basically allow anything at this stage since the meaningful typechecking occurs later
         
-          case .ARRAY; 
-            // Arrays of bytes/u8 are permitted as single-valued fields so that we can parse them as strings
-            if node.data_binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
-                return false;
+      // case .FIELD;
+      //   if node.data_binding.type.type == {
+      //     case .INTEGER;
+      //     case .BOOL;
+      //     case .FLOAT;
+      //     case .STRING;
+      //     case .ENUM;
+      //       // For enum flags, both the enclosing array and the individual elements have the same binding
+      //       // For fields, we must verify that the parent binding is the same as the field binding
+      //       ti_enum := node.data_binding.type.(*Type_Info_Enum);
+      //       if (ti_enum.enum_type_flags & .FLAGS) 
+      //       && node.parent.data_binding.value_pointer != node.data_binding.value_pointer
+      //           return false;
         
-        // TODO: permit structs which have custom parsing procedures defined
+      //     case .ARRAY; 
+      //       // Arrays of bytes/u8 are permitted as single-valued fields so that we can parse them as strings
+      //       if node.data_binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
+      //           return false;
         
-          case;
-            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, format_node_path(node,, temp));
-            return false;
-        }
+      //   // TODO: permit structs which have custom parsing procedures defined
+        
+      //     case;
+      //       log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, format_node_path(node,, temp));
+      //       return false;
+      //   }
 
       case;
         // TODO: invalid node type error?
