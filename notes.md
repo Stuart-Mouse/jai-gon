@@ -135,7 +135,7 @@ parse_source_file :: (script: *Script, source: string) -> bool {
     defer if !success  free_script(script);
     
     script.ast_root = alloc_node(script, Node_Block);
-    script.current_parent_node = script.ast_root;
+    script.current_scoope = script.ast_root;
     
     // Split here, this is where we will manually add nodes to ast root block
     // so basically above, we will jus tinit and then alloc root node
