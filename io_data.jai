@@ -66,4 +66,8 @@ IO_Data :: struct {
 
 IO_Data_Lookup: Table(*Type_Info, IO_Data);
 
+// very minor convenience
+add_io_data :: inline (T: Type, io_data: IO_Data) {
+    table_add(*IO_Data_Lookup, T.(*Type_Info), io_data);
+}
 

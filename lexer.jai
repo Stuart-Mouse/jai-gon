@@ -56,29 +56,32 @@ is_numeric :: inline (char: u8) -> bool {
 }
 
 // mutates the passed string, advancing it to the position after the returned token
-lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
-    if !skip_whitespace_and_comments(p)  return .{ type = .EOF };
+lex_next_token :: (using parser: *Parser, expect_expression := false) -> Token {
+    ok := skip_whitespace_and_comments(parser);
     
     location := cursor_location;
     make_error_token :: (error_string: string = "") -> Token #expand { 
         return .{ type = .ERROR, location = location, text = error_string }; 
     }
     
+    if !ok    return make_error_token("Error: unexpected EOF in the middle of a comment!");
+    if !file  return .{ type = .EOF, location = cursor_location };
+    
     // single character tokens, structural
     if file[0] == {
-      case #char "{";  advance(p);  return .{ type = .OBJECT_BEGIN, text = "{", location = location };
-      case #char "}";  advance(p);  return .{ type = .OBJECT_END,   text = "}", location = location };
-      case #char "[";  advance(p);  return .{ type = .ARRAY_BEGIN,  text = "[", location = location };
-      case #char "]";  advance(p);  return .{ type = .ARRAY_END,    text = "]", location = location };
-      case #char ":";  advance(p);  return .{ type = .COLON,        text = ":", location = location };
-      case #char ",";  advance(p);  return .{ type = .COMMA,        text = ",", location = location };
+      case #char "{";  advance(parser);  return .{ type = .OBJECT_BEGIN, text = "{", location = location };
+      case #char "}";  advance(parser);  return .{ type = .OBJECT_END,   text = "}", location = location };
+      case #char "[";  advance(parser);  return .{ type = .ARRAY_BEGIN,  text = "[", location = location };
+      case #char "]";  advance(parser);  return .{ type = .ARRAY_END,    text = "]", location = location };
+      case #char ":";  advance(parser);  return .{ type = .COLON,        text = ":", location = location };
+      case #char ",";  advance(parser);  return .{ type = .COMMA,        text = ",", location = location };
     }
     
     if expect_expression {
         node, cursor := LS.parse_expression(*script, file, expect_eof = false);
         if node != null {
             assert(cursor != null);
-            advance(p, cursor - file.data);
+            advance(parser, cursor - file.data);
             return .{ type = .EXPRESSION, expr = node, location = location };
         }
     } else {
@@ -87,15 +90,15 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
         // with quotes
         if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
             quote_char := file[0];
-            if !advance(p)  return make_error_token("Unexpected EOF while parsing string.");
+            if !advance(parser)  return make_error_token("Unexpected EOF while parsing string.");
             string_value := string.{ 0, file.data };
             while file[0] != quote_char {
                 // TODO: handle escape sequences more properly
-                adv := 1 + (file[0] == #char "\\").(int); 
-                string_value.count += adv;
-                if !advance(p, adv)  return make_error_token("Unexpected EOF while parsing string.");
+                advance_count := 1 + (file[0] == #char "\\").(int); 
+                string_value.count += advance_count;
+                if !advance(parser, advance_count)  return make_error_token("Unexpected EOF while parsing string.");
             }
-            advance(p);
+            advance(parser);
             return .{ type = .STRING, text = string_value, location = location };
         }
         
@@ -104,7 +107,7 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
             string_value := string.{ 0, file.data };
             while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
                 string_value.count += 1;
-                if !advance(p)  break;
+                if !advance(parser)  break;
             }
             return .{ type = .STRING, text = string_value, location = location };
         }
@@ -115,18 +118,27 @@ lex_next_token :: (using p: *Parser, expect_expression := false) -> Token {
 
 
 // cycles between skipping whitespace and comments until next character is neither
-skip_whitespace_and_comments :: (using p: *Parser) -> bool {
-    if file.count == 0 return false;
-    while true {
+skip_whitespace_and_comments :: (using parser: *Parser) -> bool {
+    if file.count == 0  return true;
+    while loop := true {
         while is_whitespace(file[0]) {
-            if !advance(p) return false;
+            if !advance(parser)  break;
         }
-        if file[0] == #char "#" {
+        if begins_with(file, "//") {
+            advance(parser, 2);
             while file[0] != #char "\n" {
-                if !advance(p) return false;
+                if !advance(parser)  return true;
             }
+            advance(parser);
         }
-        else return true;
+        else if begins_with(file, "/*") {
+            advance(parser, 2);
+            while !begins_with(file, "*/") {
+                if !advance(parser)  return false;
+            }
+            advance(parser, 2);
+        }
+        else break;
     }
     return true;
 }
@@ -141,7 +153,7 @@ is_whitespace :: inline (char: u8) -> bool {
 
 #scope_module
 
-advance :: inline (using p: *Parser, amount := 1) -> bool {
+advance :: inline (using parser: *Parser, amount := 1) -> bool {
     _amount := min(amount, file.count);
     
     for 0.._amount-1 {

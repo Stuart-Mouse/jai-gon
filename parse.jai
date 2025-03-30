@@ -33,7 +33,6 @@ init_parser :: (parser: *Parser, file: string, use_pool := false) {
     parser.cursor_location = .{ 1, 1 };
     
     LS.init_script(*parser.script);
-    print("allocator: %\n", parser.script.allocator);
     // LS.register_procedure(*parser.script, "$", (node: *DOM_Node) -> Any { return node.data_binding; });
     // LS.register_procedure(*parser.script, "&", (node: *DOM_Node) -> Any { return get_node_index(node); });
     // LS.register_procedure(*parser.script, "*", (node: *DOM_Node) -> Any { return node.data_binding; });
@@ -176,16 +175,9 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         
         expr_value_type := LS.typecheck_node(*script, node.expr, hint_type = node.data_binding.type);
         if expr_value_type != node.data_binding.type {
-            log("Error: failed to typecheck expression '%'.", "(TODO: print node)");
+            log("Error: failed to typecheck expression '%'.", LS.sprint_node(*script, node.expr));
             return false;
         }
-        
-        // TEMP DEBUG PRINTING
-        // builder: String_Builder;
-        // dbg := LS.print_node(*script, node.expr, *builder, 0);
-        // str := builder_to_string(*builder);
-        // defer free(str);
-        // print("%\n", str);
         
         value, ok := LS.evaluate_node(*script, node.expr);
         if !ok {
@@ -358,6 +350,8 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
     }
     
     defer if name_member {
+        // TODO: use remap_data here (so that this works for string-likes ([] u8 and such))
+        //       and then remove set_value_from_string entirely, since we don't really need it when we're doing the LS thing...
         if !set_value_from_string(name_member_any, node.name) {
             return false;
         }
