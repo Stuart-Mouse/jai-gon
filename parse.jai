@@ -331,7 +331,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
     name_member: *Type_Info_Struct_Member;
     name_member_any: Any;
     
-    io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+    io_data := get_io_data(node.data_binding.type);
     if io_data {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
@@ -345,16 +345,12 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                 return false;
             }
             // get new io data for new binding
-            io_data = table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+            io_data = get_io_data(node.data_binding.type);
         }
     }
     
     defer if name_member {
-        // TODO: use remap_data here (so that this works for string-likes ([] u8 and such))
-        //       and then remove set_value_from_string entirely, since we don't really need it when we're doing the LS thing...
-        if !set_value_from_string(name_member_any, node.name) {
-            return false;
-        }
+        return remap_data(name_member_any, node.name);
     }
     
     // TODO: think about whether we want to reimplement this functionality
@@ -387,7 +383,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
           case .ARRAY;
             ti_array := node.data_binding.type.(*Type_Info_Array);
             
-            io_data  := table_find_pointer(*IO_Data_Lookup, ti_array);
+            io_data := get_io_data(ti_array);
             if io_data && (.ARRAY_INDEXED & io_data.parse.flags)
                 then node.flags |= .ARRAY_INDEXED;
                 
@@ -420,7 +416,7 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                     }
                 }
             } else { // .FIXED and .VIEW
-                io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+                io_data := get_io_data(node.data_binding.type);
 
                 elem_count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
                 
@@ -453,9 +449,9 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
                         return false;
                     }
                     
-                    for child: node.children {
+                    for node.children {
                         elem_any := Any.{ ti_array.element_type, data + (ti_array.element_type.runtime_size * it_index) };
-                        add_data_binding_to_node(child, elem_any);
+                        add_data_binding_to_node(it, elem_any);
                     }
                 }
             }

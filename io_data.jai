@@ -67,7 +67,10 @@ IO_Data :: struct {
 IO_Data_Lookup: Table(*Type_Info, IO_Data);
 
 // very minor convenience
-add_io_data :: inline (T: Type, io_data: IO_Data) {
-    table_add(*IO_Data_Lookup, T.(*Type_Info), io_data);
+add_io_data :: inline (type: Type, io_data: IO_Data) {
+    table_add(*IO_Data_Lookup, type.(*Type_Info), io_data);
 }
 
+get_io_data :: inline (type: *Type_Info) -> *IO_Data {
+    return table_find_pointer(*IO_Data_Lookup, type);
+}

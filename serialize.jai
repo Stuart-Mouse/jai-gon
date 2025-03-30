@@ -109,52 +109,35 @@ serialize_dom_nodes_to_gon :: (using parser: *Parser, node: *DOM_Node, builder: 
 determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
     if node.data_binding.value_pointer == null  return .OBJECT;
 
-    io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+    io_data := get_io_data(node.data_binding.type);
 
     if node.data_binding.type.type == {
       case .INTEGER; #through;
       case .FLOAT;   #through;
       case .STRING;  #through;
+      case .ENUM;    #through;
       case .BOOL;
         return .FIELD;
 
-      case .ENUM;
-        ti_enum := node.data_binding.type.(*Type_Info_Enum);
-        if !(ti_enum.enum_type_flags & .FLAGS) {
-            return .FIELD;
-        }
-        // check if parent data binding is the same.
-        if node.parent && node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
-            return .FIELD;
-        }
-        node.flags |= .SAME_LINE;
-        return .ARRAY;
 
-      // arrays of bytes/u8 are serialized as string
-      // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
       case .ARRAY;
         ti_array := node.data_binding.type.(*Type_Info_Array);
-        if ti_array.element_type.runtime_size == 1 {
-            return .FIELD;
-        }
-        if io_data {
-            if (.AS_OBJECT     & io_data.serialize.flags) ||
-               (.ARRAY_INDEXED & io_data.serialize.flags) {
-                return .OBJECT;
-            }
+        
+        // arrays of bytes/u8 are serialized as string
+        // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
+        if ti_array.element_type.runtime_size == 1  return .FIELD;
+        
+        if io_data && (.AS_OBJECT | .ARRAY_INDEXED) & io_data.serialize.flags {
+            return .OBJECT;
         }
         return .ARRAY;
+        
 
       case .STRUCT;
-        if io_data {
-            if .AS_ARRAY & io_data.serialize.flags {
-                return .ARRAY;
-            }
+        if io_data && .AS_ARRAY & io_data.serialize.flags {
+            return .ARRAY;
         }
         return .OBJECT;
-
-      case;
-        return .INVALID;
     }
 
     return .INVALID;
@@ -166,48 +149,20 @@ append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
     if node.data_binding.type.type == {
       case .STRUCT;
         ti_struct := node.data_binding.type.(*Type_Info_Struct);
-
         for ti_struct.members {
-            member_any := Any.{
-                value_pointer = node.data_binding.value_pointer + it.offset_in_bytes,
-                type          = it.type,
-            };
+            member_any := Any.{ it.type, node.data_binding.value_pointer + it.offset_in_bytes };
             // figure out whether to prepend elems (will do for things that need to be attrs)
             append_data_node(node, it.name, member_any);
         }
-
         return;
 
       case .ARRAY;
-        ti_array := node.data_binding.type.(*Type_Info_Array);
-
-        data       : *void = ---;
-        elem_count : int   = ---;
-
-        if ti_array.array_type == .FIXED {
-            data       = node.data_binding.value_pointer;
-            elem_count = ti_array.array_count;
-        } else {
-            raw_array := node.data_binding.value_pointer.(*Resizable_Array);
-            data       = raw_array.data;
-            elem_count = raw_array.count;
-            if elem_count == 0  return; // skip serializing empty dynamic arrays
-        }
-
-        if data == null  return;
-
-        for 0..elem_count-1 {
-            elem_any := Any.{
-                value_pointer = data + (ti_array.element_type.runtime_size * it),
-                type          = ti_array.element_type
-            };
-
+        array := make_any_array(node.data_binding.type);
+        for array {
             // TODO: as indexed, as object
-
-            elem_name: string = tprint("%", it);
-            append_data_node(node, elem_name, elem_any);
+            elem_name := tprint("%", it_index);
+            append_data_node(node, elem_name, it);
         }
-
         return;
     }
 }

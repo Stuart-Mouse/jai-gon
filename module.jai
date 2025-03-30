@@ -222,6 +222,40 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 }
 
 
+
+
+Any_Array :: struct {
+    value_pointer: *void;
+    type: *Type_Info_Array;
+}
+
+make_any_array :: (any: Any) -> Any_Array {
+    assert(any.type.type == .ARRAY);
+    return .{ any.type, any.value_pointer };
+}
+
+get_count_and_data :: inline (array: Any_Array) -> (int, *void) {
+    count, data := get_array_count_and_data(array.value_pointer, array.type);
+    return count, data;
+}
+
+get_index :: inline (array: Any_Array, index: int) -> Any {
+    count, data := get_count_and_data(array);
+    assert(index >= 0 && index < count);
+    return Any.{ array.element_type, data + (array.element_type.runtime_size * index) };
+}
+
+for_expansion :: (array: Any_Array, body: Code, for_flags: For_Flags) {
+    count, data := get_count_and_data(array);
+    `it = Any.{ array.element_type, data };
+    for `it_index: 0..count-1 {
+        #insert body;
+        it.value_pointer += array.element_type.runtime_size;
+    }
+}
+
+
+
 #scope_module
 
 #import "Basic";
