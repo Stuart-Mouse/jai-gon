@@ -38,118 +38,21 @@ load_and_parse_file :: (path: string, code: Code) -> bool #expand {
 }
 
 
-struct_member_has_note :: (m: *Type_Info_Struct_Member, note: string) -> bool {
-    for m.notes
+struct_member_has_note :: (member: Type_Info_Struct_Member, note: string) -> bool {
+    for memeber.notes
         if it == note
             return true;
     return false;
 }
 
 get_struct_member_with_note :: (struct_info: *Type_Info_Struct, note: string) -> *Type_Info_Struct_Member {
-    for * m: struct_info.members
-        if inline struct_member_has_note(m, note)
-            return m;
+    for *struct_info.members
+        if inline struct_member_has_note(it, note)
+            return it;
     return null;
 }
 
 
-
-set_value_from_string :: (any: Any, text: string) -> bool {
-    // While unlikely, it is possible that we are passed an empty string.
-    // If this happens, just don't set the value and return.
-    if text.count <= 0 return true;
-  
-    if any.type.type == {
-        case .INTEGER;
-            result, success := string_to_int(text);
-            if !success return false;
-            
-            ti_integer := any.type.(*Type_Info_Integer);
-            if ti_integer.signed {
-                valid, low, high := range_check_and_store(result, ti_integer, any.value_pointer);
-                // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
-                if !valid return false;
-            } else {
-                valid, low, high := range_check_and_store(result.(u64), ti_integer, any.value_pointer);
-                // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
-                if !valid return false;
-            }  
-    
-            return true;  
-  
-        case .FLOAT;
-            if any.type.runtime_size == 4 {
-                val, ok, text := string_to_float(text);
-                if !ok return false;
-                any.value_pointer.(*float).* = val;
-            }
-            else if any.type.runtime_size == 8 {
-                val, ok, text := string_to_float64(text);
-                if !ok return false;
-                any.value_pointer.(*float64).* = val;
-            }
-            else return false;  
-  
-        case .BOOL;
-            b := (to_upper(text[0]) == #char "T");
-            if any.type.runtime_size == 1 { 
-                any.value_pointer.(*bool).* = b; 
-            }
-            else return false;
-            
-        case .STRING;
-            // TODO: add conditional logic to NOT copy string if desired
-            // any.value_pointer.(*string).* = text;  
-            any.value_pointer.(*string).* = copy_string(text);  
-  
-        case .ENUM;
-            enum_type := any.type.(*Type_Info_Enum);  
-  
-            // TODO: May add this back in later...
-            // First, try to parse it as an integer.
-            // _any := any;
-            // _any.type = enum_type.internal_type;
-            // success := set_value_from_string(_any, text);
-            success := false;  
-  
-            // If that doesn't work, try to parse the enum names.
-            if !success {
-                if enum_type.enum_type_flags & .FLAGS {
-                    for enum_type.names {
-                        if it == text {
-                            if enum_type.runtime_size == {
-                                case 1; any.value_pointer.(*s8 ).* |= enum_type.values[it_index].(s8 ); 
-                                case 2; any.value_pointer.(*s16).* |= enum_type.values[it_index].(s16); 
-                                case 4; any.value_pointer.(*s32).* |= enum_type.values[it_index].(s32); 
-                                case 8; any.value_pointer.(*s64).* |= enum_type.values[it_index].(s64); 
-                            }
-                            return true;
-                        }
-                    }
-                }
-                else {
-                    for enum_type.names {
-                        if it == text {
-                            if enum_type.runtime_size == {
-                                case 1; any.value_pointer.(*s8 ).* = enum_type.values[it_index].(s8 ); 
-                                case 2; any.value_pointer.(*s16).* = enum_type.values[it_index].(s16); 
-                                case 4; any.value_pointer.(*s32).* = enum_type.values[it_index].(s32); 
-                                case 8; any.value_pointer.(*s64).* = enum_type.values[it_index].(s64); 
-                            }
-                            return true;
-                        }
-                    }
-                }
-              
-            }
-            if !success return false;  
-  
-        case;
-            return false;
-    }
-    
-    return true;
-}
 
 // TODO: translate array add any at index and array reserve any
 
