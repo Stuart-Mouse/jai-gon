@@ -37,25 +37,6 @@ load_and_parse_file :: (path: string, code: Code) -> bool #expand {
     return true;
 }
 
-
-struct_member_has_note :: (member: Type_Info_Struct_Member, note: string) -> bool {
-    for memeber.notes
-        if it == note
-            return true;
-    return false;
-}
-
-get_struct_member_with_note :: (struct_info: *Type_Info_Struct, note: string) -> *Type_Info_Struct_Member {
-    for *struct_info.members
-        if inline struct_member_has_note(it, note)
-            return it;
-    return null;
-}
-
-
-
-// TODO: translate array add any at index and array reserve any
-
 array_add_any :: inline (array: Any) -> Any, bool {
     // verify that array is in fact an array
     if array.type.type != .ARRAY {
@@ -159,6 +140,12 @@ for_expansion :: (array: Any_Array, body: Code, for_flags: For_Flags) {
 
 
 
+#load "dom.jai";
+#load "parse.jai";
+#load "serialize.jai";
+#load "lexer.jai";
+#load "io_data.jai";
+
 #scope_module
 
 #import "Basic";
@@ -171,9 +158,3 @@ for_expansion :: (array: Any_Array, body: Code, for_flags: For_Flags) {
 #import "Data_Packer";
 
 LS :: #import "Lead_Sheets"(DEBUG = false);
-
-#load "dom.jai";
-#load "parse.jai";
-#load "serialize.jai";
-#load "lexer.jai";
-#load "io_data.jai";
