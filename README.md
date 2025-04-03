@@ -1,14 +1,22 @@
 # Jai GON Parser
 
-The Jai GON Parser is a fast and powerful SAX-style parser for GON files with a simple interface that one can begin using within minutes.
+## Dependencies
 
-This parser leverages the power of Jai's runtime type information to automatically convert string data from the GON file into its proper internal binary type. 
-This automates away all of the routine boilerplate that one often finds oneself writing in serialization code. All you have to do is tell the parser where in the GON file to find your desired data and what variable you want that data stored to. The parser handles any necessary type conversions automatically. It also handles complex, nested structures and all types of arrays. 
+This module depends on my Utils module (sorry): https://github.com/Stuart-Mouse/jai-utils
+I use this Utils module for many functions which are common across my other modules.
 
-The functionality of the parser can also be extended or modified through callback procedures. 
-This can be used to implement custom data loading procedures for special types, or modify previously loaded data.
 
-And all of this is done in a single linear pass over the source file.
-The result is an extremely powerful and easy to use parser with a negligible memory footprint. 
+## About
+
+GON is a JSON-like data file format, originally create by Tyler Glaiel: https://github.com/TylerGlaiel/GON
+
+The Jai GON Parser has changed a lot over time, and the version currently in development is not really even GON anymore...
+BUT if you're interested, go ahead and read about the parser at the link below. 
+
+The current version on the main branch here is a DOM-style parser with some additional features over regular GON, in particular, there is some additional syntax for created 'references' between fields in a file.
+There are value, pointer, and index references, which are exactly what they sound like.
+
+Current work is being done on the `lead-sheets` branch, where I've integrated the file format with my scripting language module in order to allow the user to write arbitrary expressions into their data files, including dynamically calling into native code.
 
 For a more extensive description of the project, please visit stuart-mouse.github.io/jai-gon.
+
