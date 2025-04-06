@@ -329,3 +329,13 @@ could return value type of `DOM_Node` when resolving identifier
 we can't exactly use normal operator overloading for this because that would give us the data bindings with a value type of Any, which we don't want.
 
 so for now we will actually just have to walk nodes and really hack the operators and force resolve them to the dom node operators we need
+
+
+
+
+we can now reimplement these using directives
+    in the future, would be nice to have the single character operators for syntax again, but in the mean time its a fair compromise to use `#identifier` directives instead, for the sake of consistency
+    `#index`, `#address`, `#value`
+
+
+

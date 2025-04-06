@@ -16,9 +16,48 @@ Parser :: struct {
     
     // TODO: could we use just portions of script? will require refactoring LS internals
     script:             LS.Script;
+    index_directive_handle: int;
+    value_directive_handle: int;
 };
 
-init_parser :: (parser: *Parser, file: string, use_pool := false) {
+index_directive :: (using call: *LS.Directive_Call, dom_parser: *Parser, dom_node: *DOM_Node, path: string) -> *LS.Node, bool {
+    if phase == .TYPECHECK {
+        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
+        if ref_node == null {
+            log("Error: unable to resolve node path '%'.", path);
+            return null, false; 
+        }
+        return LS.make_literal(script, get_node_index(ref_node)), true;
+    }
+    return null, true;
+}
+
+value_directive :: (using call: *LS.Directive_Call, dom_parser: *Parser, dom_node: *DOM_Node, path: string) -> *LS.Node, bool {
+    if phase == .TYPECHECK {
+        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
+        if ref_node == null {
+            log("Error: unable to resolve node path '%'.", path);
+            return null, false; 
+        }
+        
+        if ref_node.data_binding.value_pointer == null {
+            // TODO: actually handle this case by creating instance of hinted type?
+            log("Error: node '%' referenced in expression '%' had no data binding!.", path, "(TODO: print node)");
+            return null, false;
+        }
+        
+        if !process_node_binding(dom_parser, ref_node) return null, false;
+        
+        return LS.make_literal(script, ref_node.data_binding), true;
+    }
+    return null, true;
+}
+
+// TODO: this is only inlined because of the need to have pointer to parser which is passed to directives be valid
+//       what we really should do to fix this is allow implicit dereference on directive user data parameters
+//       like, maybe that's a bit weird, but in any case it will greatly help with these sorts of situations by removing an unnecessary indirection.
+//       also, we already do this for procdures, and we will need to be able to do this for the parameters in the script anyhow, that way we can take things by reference when we desugar directives into procedure calls
+init_parser :: inline (parser: *Parser, file: string, use_pool := false) {
     if use_pool {
         reset(*parser.node_pool, overwrite_memory = true);
         parser.node_allocator = .{
@@ -33,11 +72,16 @@ init_parser :: (parser: *Parser, file: string, use_pool := false) {
     parser.cursor_location = .{ 1, 1 };
     
     LS.init_script(*parser.script);
-    // LS.register_procedure(*parser.script, "$", (node: *DOM_Node) -> Any { return node.data_binding; });
-    // LS.register_procedure(*parser.script, "&", (node: *DOM_Node) -> Any { return get_node_index(node); });
-    // LS.register_procedure(*parser.script, "*", (node: *DOM_Node) -> Any { return node.data_binding; });
     
-    // TODO: move this elsewhere, this is just for testing
+    parser.index_directive_handle = -1;
+    parser.value_directive_handle = -1;
+    _, parser.index_directive_handle = LS.register_directive(*parser.script, "index", index\ _directive, parser, null.(*DOM_Node));
+    _, parser.value_directive_handle = LS.register_directive(*parser.script, "value", value\ _directive, parser, null.(*DOM_Node));
+    // LS.register_directive(*parser.script, "address", address_directive, parser.*, null.(*DOM_Node));
+    
+    print("index_directive_handle: %\n", parser.index_directive_handle);
+    print("value_directive_handle: %\n", parser.value_directive_handle);
+    
     LS.register_common_types(*parser.script); 
 }
 
@@ -172,6 +216,10 @@ process_node_binding :: (using parser: *Parser, node: *DOM_Node) -> resolved: bo
         };
         
         if !LS.walk_nodes(*script, *node.expr, walk_proc, *parser_and_node)  return false;
+        
+        // set the current node in field reference directives
+        if index_directive_handle > -1 then script.directives[index_directive_handle].user_data[1] = node;
+        if value_directive_handle > -1 then script.directives[value_directive_handle].user_data[1] = node;
         
         expr_value_type := LS.typecheck_node(*script, node.expr, hint_type = node.data_binding.type);
         if expr_value_type != node.data_binding.type {
