@@ -339,3 +339,82 @@ we can now reimplement these using directives
 
 
 
+We should just rewrite the gon parser to use the Lead sheets lexer directly, that way there's not the silly handoff logic required to switch back and forth
+
+we probably still want to be able to disable certain LS language / syntax constructs with a flag so that those are handled purely by GON
+    wonder where I put my notes about the syntax of brackets and braces in LS vs gon
+        probabyl in wonky kong notes ngl
+            ah yeah, here they are...
+            
+            
+`&&` operator (or otherwise) for doing struct merging in gon
+    then enforce single-assignment, no aliasing of fields/data bindings
+    
+GON / LSD needs a general overhaul to clean up the codebase
+    tighter integration of DOM nodes and expresison nodes, use a common pool for allocation
+    better typehchecking for field references
+    becuase we now have actual struct literals in LSD, there is no real reason to use GON arrays for structs
+    also, the current fact of syntactic difference in GON / LS using many of the same tokens is mildly confusing
+    concerns:
+        more tightly integrating LS with GON could make it more difficul to serialize data
+        how to disambiguate/disentangle structs in expressions vs GON objects/arrays
+            the trick here is that we really don't need the dot-brace syntax in LSD / GON since the only type of scopes that we have are data scopes
+            and as far as gon markup is concerned, the clearest use of brace vs brackets is to denote when we are parsing key/value pairs or just value
+            for the sake of a declarative data file format, this is more desirable that allowing the 'maybe expressions, maybe declarations' sort of struct literals that Jai uses
+            so we will probably want to just adjust the syntax of struct literals in LSD such that they use brackets instead of braces
+                (and anyhow, we don't actually have array literals in LS, nor will we likely ever have them. so perhaps we are more free to use brackets for 'user-level' syntax)
+                
+remove need for io data in some aspects
+    since LS now allows for much more expressive parsing that simple GON, we coudl actaully remove the need for certain io data stuff by using simple annotations in the data file itself
+    for example, indexed arrays
+        no reason we should have to mark them explicitly as such, could either make that totally implicit when an array is bound to a GON object,
+        OR we could add some supporting syntax like a `#` before the array to denote that it's indexed
+            still, there's some tricky situation there when it comes to enum-indexed arrays, as we still need some way to explicitly tell what enum type to use
+            and in that case the io data still seems ideal...
+
+figure out how to do serialization goodly now that things have changed so much
+    the proper answer will probably be just giving the user some kind of get_nodes() callback in serialization io_data, for the most general case
+    we will want to be able to write out certain fields as LS expressions, just as we can read them in as such
+    now a nice general-purpose solution should exist for the simple cases where we just serialize as before, name and data binding value
+
+    for certain applications, we may actaully want to keep entire GON source files loaded in as DOM while the program runs, so that we can also use GON or LSD data in the same way as I plan to use scripts, making them sort of living data
+    because as soon as we drop the DOM after parsing, we loose all information about the expressions we had for a file
+    and perhaps we want to be able to back-propogate some stuff liek in LS (malleable literals) but make it more generic and automatic in GON
+
+    in any case, I am definitely getting ahead of myself here again, and in all likelihood, LSD files will be used almost exclusively as read-only data
+    I don't see myself writing over most of my data files like entity_templates or tilesets, but may do so for simple things like palettes which won't use complex expressions anyhow
+
+maybe add some directive to top of GON file (or use different file extension) which denotes that a file will be "dumb"
+    which is to say that it will only use value expressions (a single literal), and will not use field references
+    maybe this would allow us to parse faster by just skipping expression parsing entirely and only using set_value_from_string ? 
+
+
+
+
+so the consistent thing to do for LS/GON integration is to disable parsing of struct literals in LS, and instead 
+    probably also need to disable blocks at expression-level, since those also conflict syntactically
+
+or, maybe we can somehow leverage named blocks already existing as a syntax construct ?
+
+nah.... but we do really want a more integrated node AST for this as well, like we have for the Java mapper thing
+    but for the sake of generalized expressions, it's still quite necessary to have struct literals
+    so we need a syntax that works for both that and gon object/array 
+    
+    maybe we can just always allow a type identifier (or typeexpression in parenthesis) before either a `{...}` or `[...]` block
+    and maybe we do also use `{}` only for structs and `[]` only for arrays, so that we can still create array literals for e.g. passing to procedures
+        we could allow using either one for either one, and make it syntactic-based, but that feels kind of bad?
+        honestly if we get this far it's not too big of a deal to try either way. there's already a lot that we would have to do just to refactor GON enough for this.
+    the real tricky thing about using either syntax thing for object/array literals is that we will probably ultimately need custom node types, which means callbacks in LS for parsing, typechecking, executing
+        not like that's gonna be a *huge* deal though, and should be a good opportunity for development
+        
+so baby steps are:
+    remove gon lexer entirely (or what's left of it)
+    lex gon files entirely with LS lexer (no handoff)
+    
+
+
+
+
+
+
+
