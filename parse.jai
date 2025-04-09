@@ -15,7 +15,7 @@ Parser :: struct {
     cursor_location:    Source_Location;
     
     // TODO: could we use just portions of script? will require refactoring LS internals
-    script:             LS.Script;
+    script: LS.Script;
     index_directive_handle: int;
     value_directive_handle: int;
 };
@@ -648,21 +648,4 @@ add_data_binding_to_node :: (node: *DOM_Node, binding: Any) -> bool  {
     }
     
     return true;
-}
-
-#scope_module
-
-as_type :: inline (ti: *Type_Info) -> Type { return (cast(*Type)*ti).*; }
-
-
-enum_name_to_value :: (ti: *Type_Info_Enum, name: string) -> s64, bool {
-    assert(ti.type == .ENUM);
-    for ti.names  if name == it  return ti.values[it_index], true;
-    return 0, false;
-}
-
-enum_value_to_name :: (ti: *Type_Info_Enum, value: s64) -> string {
-    assert(ti.type == .ENUM);
-    for ti.values  if value == it  return ti.names[it_index];
-    return "";
 }

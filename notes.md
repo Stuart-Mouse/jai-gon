@@ -413,7 +413,9 @@ so baby steps are:
     
 
 
-
+not sure yet how to typecheck the dom
+    can't really reference nodes inside of an object by path if that object is assigned some merged object value
+        this isn't a thing yet, but it surely will be
 
 
 
