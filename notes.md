@@ -420,3 +420,12 @@ not sure yet how to typecheck the dom
 
 
 
+refactor notes
+
+overall flow
+    1. parse the dom out like before
+    2. append data bindings
+    3. typecheck
+    4. evaluate
+
+

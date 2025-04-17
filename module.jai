@@ -55,4 +55,4 @@ using,except(next_power_of_two) Hash_Table :: #import "Hash_Table";
 
 #import "Utils";
 #import "Data_Packer";
-LS :: #import "Lead_Sheets";
+using LS :: #import "Lead_Sheets";
