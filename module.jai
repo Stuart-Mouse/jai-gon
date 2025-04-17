@@ -41,7 +41,6 @@ load_and_parse_file :: (path: string, code: Code) -> bool #expand {
 #load "dom.jai";
 #load "parse.jai";
 #load "serialize.jai";
-#load "lexer.jai";
 #load "io_data.jai";
 
 #scope_module

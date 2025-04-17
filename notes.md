@@ -428,4 +428,11 @@ overall flow
     3. typecheck
     4. evaluate
 
+this process is frustrating me a bit, even though it's more or less coming along
+before we can really fully integrate the typechecking and evaluation of Gon nodes with normal LS nodes, we will need ot implement a few things on the LS side
+    1. evaluation callbacks, so that we can just call evaluate_node on the dom root
+    2. parsing callbacks and some way to disable parsing certain types of language constructs
+        - specifically, we want to disable struct literals and add in the ability to parse objects / arrays instead 
+        
+
 

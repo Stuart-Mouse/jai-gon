@@ -6,12 +6,12 @@ things: {
         text:       "this is a string",
     },
     "Thing 2": {
-        // fraction:   $numbers[2].(float) / 5,
+        fraction:   #value("numbers")[2].(float) / 5,
         numbers:    [ 35, 7, 105, 3, 0 ],
     },
     "Thing 3": {
         text:       "this is a another string",
-        // fraction:   &`../Thing 1/text`,
+        fraction:   #index("../Thing 1/text"),
         // numbers:    [ 0, 0, $`/things/Thing 2/numbers`[1], 0, 0 ],
     }
 },

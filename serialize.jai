@@ -56,7 +56,7 @@ serialize_dom_nodes_to_gon :: (using parser: *Parser, node: *Node_Field, builder
 
     if !in_array {
         append(builder, to_conformant_string(node.name,, temp));
-        append(builder, " ");
+        append(builder, ": ");
     }
 
     // For debugging, seeing type of data binding

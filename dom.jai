@@ -280,7 +280,6 @@ clone_node_recursive :: (dst: *Node_Field, src: *Node_Field) -> bool {
 
 format_node_path :: (node: *Node_Field) -> string {
     builder: String_Builder;
-    init_string_builder(*builder);
     append_node_path_to_string_builder(*builder, node);
     return builder_to_string(*builder);
 }

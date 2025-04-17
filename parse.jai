@@ -2,17 +2,19 @@
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     using #as script: Script;
-    
     dom_root: Node_Field;
-    
-    // may not need these later...
-    // index_directive_handle: int;
-    // value_directive_handle: int;
 };
 
-index_directive :: (using call: *Directive_Call, dom_parser: *Parser, dom_node: *Node_Field, path: string) -> *Node, bool {
+index_directive :: (using call: *Directive_Call, path: string) -> *Node, bool {
     if phase == .TYPECHECK {
-        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
+        field := script.current_scope.(*Node_Field);
+        print("scope: %\n", field.node_type);
+        if field.node_type != Node_Field {
+            log("asdfasdfasdfasdf\n");
+            return null, false;
+        }
+        
+        ref_node := find_node_by_path(xx script, field.parent, path);
         if ref_node == null {
             log("Error: unable to resolve node path '%'.", path);
             return null, false; 
@@ -22,9 +24,16 @@ index_directive :: (using call: *Directive_Call, dom_parser: *Parser, dom_node: 
     return null, true;
 }
 
-value_directive :: (using call: *Directive_Call, dom_parser: *Parser, dom_node: *Node_Field, path: string) -> *Node, bool {
+value_directive :: (using call: *Directive_Call, path: string) -> *Node, bool {
     if phase == .TYPECHECK {
-        ref_node := find_node_by_path(dom_parser, dom_node.parent, path);
+        field := script.current_scope.(*Node_Field);
+        print("scope: %\n", field.node_type);
+        if field.node_type != Node_Field {
+            log("asdfasdfasdfasdf\n");
+            return null, false;
+        }
+        
+        ref_node := find_node_by_path(xx script, field.parent, path);
         if ref_node == null {
             log("Error: unable to resolve node path '%'.", path);
             return null, false; 
@@ -36,7 +45,7 @@ value_directive :: (using call: *Directive_Call, dom_parser: *Parser, dom_node: 
             return null, false;
         }
         
-        if !process_node_binding(dom_parser, ref_node) return null, false;
+        if !process_node_binding(xx script, ref_node) return null, false;
         
         return make_literal(script, ref_node.binding), true;
     }
@@ -50,18 +59,15 @@ value_directive :: (using call: *Directive_Call, dom_parser: *Parser, dom_node: 
 init_parser :: (parser: *Parser, file: string, use_pool := false) {
     init_script(*parser.script);
     
-    // parser.index_directive_handle = -1;
-    // parser.value_directive_handle = -1;
-    // _, parser.index_directive_handle = register_directive(*parser.script, "index", index\ _directive, parser, null.(*Node_Field));
-    // _, parser.value_directive_handle = register_directive(*parser.script, "value", value\ _directive, parser, null.(*Node_Field));
-    
-    // print("index_directive_handle: %\n", parser.index_directive_handle);
-    // print("value_directive_handle: %\n", parser.value_directive_handle);
+    register_directive(*parser.script, "index", index_directive);
+    register_directive(*parser.script, "value", value_directive);
     
     parser.script.typecheck_callback = typechecking_callback;
     register_common_types(*parser.script);
     
     init_lexer(*parser.lexer, file);
+    
+    parser.dom_root.node_type = Node_Field;
 }
 
 deinit_parser :: (parser: *Parser) {
@@ -70,10 +76,6 @@ deinit_parser :: (parser: *Parser) {
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
 // after calling this, you can just add your data bindings and then process them
-
-// TODO: it is currently CRITICAL that this is an inline proc, since the allocators in the parser and script point to pools on the parser and script themselves, respectively.
-//       this feels like maybe a bad thing, and perhaps both of these should instead just have the user set the allocator manually.
-//       but on the other hand, using them with a pool is the most likely case, and shouldn't the default be nice to use?
 parse_file_to_dom :: inline (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
@@ -100,10 +102,7 @@ process_data_bindings :: (using parser: *Parser) -> bool {
 process_node_binding :: (using parser: *Parser, node: *Node_Field) -> resolved: bool {
     // We set BINDING_RESOLVED on exit in any case, since we only process each node once, 
     //      and it either succeeds or everything fails.
-    if .BINDING_RESOLVED & node.field_flags {
-        // log("Info: node '%' was already resolved.", format_node_path(node,, temp));
-        return true;
-    }
+    if .BINDING_RESOLVED & node.field_flags  return true;
     defer node.field_flags |= .BINDING_RESOLVED; 
     
     if is_aggregate(node) {
@@ -112,10 +111,6 @@ process_node_binding :: (using parser: *Parser, node: *Node_Field) -> resolved: 
                 return false;
     } 
     else if node.binding.value_pointer != null {
-        // TOOD: we can probably skirt the extra indirection issue here by just allowing the same implicit referencing on directive arguments that we allow on external procedure calls
-        // if index_directive_handle > -1 then script.directives[index_directive_handle].user_data[1] = node;
-        // if value_directive_handle > -1 then script.directives[value_directive_handle].user_data[1] = node;
-        
         if !typecheck_node(*script, node) {
             log(format_error(script.error));
             return false;
@@ -126,9 +121,7 @@ process_node_binding :: (using parser: *Parser, node: *Node_Field) -> resolved: 
             log("Error: failed to evaluate expression '%'!", sprint_node(*script, node.value,, temp));
             return false;
         }
-        assert(value.type == node.binding.type, "% != %", as_type(value.type), as_type(node.binding.type));
-        
-        memcpy(node.binding.value_pointer, value.value_pointer, value.type.runtime_size);
+        memcpy_any(node.binding, value);
     }
     
     return true;
@@ -155,7 +148,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     // children: [..] *Node_Field;
     // array_reset(*children);
     
-    while L_Loop := (parent != null) {
+    while parse_loop := (parent != null) {
         name_token: Token;
         
         next_token := peek_token(*lexer);
@@ -164,7 +157,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
-            break L_Loop;
+            break parse_loop;
         }
         
         if next_token.type == {
@@ -192,6 +185,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             // parent.value.(*Node_Object).fields = array_copy(children,, script.allocator);
             // array_reset_keeping_memory(*children);
             parent = parent.parent;
+            script.current_scope = parent;
             continue;
             
           case .CLOSE_BRACKET;
@@ -204,6 +198,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             // parent.value.(*Node_Array).fields = array_copy(children,, script.allocator);
             // array_reset_keeping_memory(*children);
             parent = parent.parent;
+            script.current_scope = parent;
             continue;
         }
         
@@ -256,7 +251,9 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         // array_add(*children, node);
         if node.value.node_type == {
           case Node_Object; #through;
-          case Node_Array;  parent = node;
+          case Node_Array;  
+            parent = node;
+            script.current_scope = parent;
         }
     }
     
@@ -279,8 +276,10 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
     if io_data {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
-        name_member = io_data.name_member;
-        if name_member then name_member_any = Any.{ name_member.type, node.binding.value_pointer + name_member.offset_in_bytes };
+        if io_data.name_member {
+            name_member = io_data.name_member;
+            name_member_any = Any.{ name_member.type, node.binding.value_pointer + name_member.offset_in_bytes };
+        }
         
         if io_data.parse.bind_proc {
             node.binding = io_data.parse.bind_proc(node.binding);
@@ -521,6 +520,9 @@ typechecking_callback :: (
       case Node_Field;
         field := node.(*Node_Field);
         if field.binding.type == null  return null;
+        
+        defer_restore(*current_scope);
+        current_scope = field;
         
         // We set the PENDING_DEPENDENCY flag on this node only for the duration of this call
         //      so that we know if we visit it again, we have gone in a loop.
