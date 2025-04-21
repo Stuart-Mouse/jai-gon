@@ -433,6 +433,9 @@ before we can really fully integrate the typechecking and evaluation of Gon node
     1. evaluation callbacks, so that we can just call evaluate_node on the dom root
     2. parsing callbacks and some way to disable parsing certain types of language constructs
         - specifically, we want to disable struct literals and add in the ability to parse objects / arrays instead 
-        
+        - we only need to disable things that are expression-level constructs atm, since we will only be calling parse_expression form GON
+        - we will only need ot hook into parse_leaf witha callback atm, though maybe later we will need to extend some other parsing proc     
+
+
 
 

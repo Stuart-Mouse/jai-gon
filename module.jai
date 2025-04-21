@@ -55,3 +55,19 @@ using,except(next_power_of_two) Hash_Table :: #import "Hash_Table";
 #import "Utils";
 #import "Data_Packer";
 using LS :: #import "Lead_Sheets";
+
+
+coerce_small_any :: inline (dst_type: Type, src: Small_Any) -> (Small_Any, bool) {
+    value, ok := coerce_small_any(type_info(dst_type), src);
+    return value, ok;
+}
+
+coerce_small_any :: (dst_type: *Type_Info, src: Small_Any) -> (Small_Any, bool) {
+    if is_numeric_type(dst_type) && is_numeric_type(src.type) {
+        dst := Small_Any.{ type = dst_type };
+        remap_data(to_any(*dst), to_any(*src));
+        return dst, true;
+    }
+    return .{}, false;
+}
+

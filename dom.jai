@@ -72,6 +72,21 @@ for_expansion :: (list: *Field_List, body: Code, flags: For_Flags) #expand {
     }
 }
 
+Reference_Type :: enum {
+    VALUE;
+    INDEX;
+    POINTER;
+}
+
+Node_Reference :: struct {
+    using #as 
+    base:                   Node;
+    reference_type:         Reference_Type;
+    field_path:             string;
+    resolved_field:         *Node_Field;
+    resolved_field_index:   Small_Any;
+}
+
 get_fields :: inline (field: *Node_Field) -> *Field_List {
     assert(is_aggregate(field));
     return *field.value.(*Node_Object).fields;
