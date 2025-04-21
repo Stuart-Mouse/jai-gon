@@ -145,7 +145,7 @@ find_node_by_path :: (parser: *Parser, node: *Node_Field, path: string) -> (*Nod
     search_from_node := node;
     if _path[0] == #char "/" {
         advance(*_path);
-        search_from_node = *parser.dom_root;
+        search_from_node = parser.dom_root;
     }
     ret, idx := find_node_by_path(search_from_node, _path);
     return ret, idx;

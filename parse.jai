@@ -2,76 +2,20 @@
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     using #as script: Script;
-    dom_root: Node_Field;
+    dom_root: *Node_Field;
 };
 
-// index_directive :: (using call: *Directive_Call, path: string) -> *Node, bool {
-//     if phase == .TYPECHECK {
-//         field := script.current_scope.(*Node_Field);
-//         print("scope: %\n", field.node_type);
-//         if field.node_type != Node_Field {
-//             log("asdfasdfasdfasdf\n");
-//             return null, false;
-//         }
-        
-//         ref_node := find_node_by_path(xx script, field.parent, path);
-//         if ref_node == null {
-//             log("Error: unable to resolve node path '%'.", path);
-//             return null, false; 
-//         }
-//         return make_literal(script, get_node_index(ref_node)), true;
-//     }
-//     return null, true;
-// }
-
-// value_directive :: (using call: *Directive_Call, path: string) -> *Node, bool {
-//     if phase == .TYPECHECK {
-//         field := script.current_scope.(*Node_Field);
-//         print("scope: %\n", field.node_type);
-//         if field.node_type != Node_Field {
-//             log("asdfasdfasdfasdf\n");
-//             return null, false;
-//         }
-        
-//         ref_node := find_node_by_path(xx script, field.parent, path);
-//         if ref_node == null {
-//             log("Error: unable to resolve node path '%'.", path);
-//             return null, false; 
-//         }
-        
-//         if ref_node.binding.value_pointer == null {
-//             // TODO: actually handle this case by creating instance of hinted type?
-//             log("Error: node '%' referenced in expression '%' had no data binding!.", path, "(TODO: print node)");
-//             return null, false;
-//         }
-        
-//         if !process_node_binding(xx script, ref_node) return null, false;
-        
-//         return make_literal(script, ref_node.binding), true;
-//     }
-//     return null, true;
-// }
-
-// TODO: this is only inlined because of the need to have pointer to parser which is passed to directives be valid
-//       what we really should do to fix this is allow implicit dereference on directive user data parameters
-//       like, maybe that's a bit weird, but in any case it will greatly help with these sorts of situations by removing an unnecessary indirection.
-//       also, we already do this for procdures, and we will need to be able to do this for the parameters in the script anyhow, that way we can take things by reference when we desugar directives into procedure calls
 init_parser :: (parser: *Parser, file: string, use_pool := false) {
     init_script(*parser.script);
     
     parser.script.my_parse_leaf   = gon_parse_leaf;
     parser.script.my_parse_binary = gon_parse_binary;
     
-    // register_directive(*parser.script, "index", index_directive);
-    // register_directive(*parser.script, "value", value_directive);
-    
     parser.script.typecheck_callback = typechecking_callback;
     parser.script.evaluate_callback  = evaluation_callback;
     register_common_types(*parser.script);
     
     init_lexer(*parser.lexer, file);
-    
-    parser.dom_root.node_type = Node_Field;
 }
 
 deinit_parser :: (parser: *Parser) {
@@ -80,49 +24,49 @@ deinit_parser :: (parser: *Parser) {
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
 // after calling this, you can just add your data bindings and then process them
-parse_file_to_dom :: inline (file: string) -> (Parser, bool) {
+parse_file_to_dom :: (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
     return parser, true;
 }
 
-add_data_binding_to_dom :: (using parser: *Parser, binding: Any, path: string) -> bool {
-    node := find_node_by_path(*parser.dom_root, path);
+add_data_binding_to_dom :: (parser: *Parser, binding: Any, path: string) -> bool {
+    node := find_node_by_path(parser.dom_root, path);
     return add_data_binding_to_node(node, binding);
 }
 
-add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
+add_data_bindings_to_dom :: (parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
     for bindings
         if !add_data_binding_to_dom(parser, it.binding, it.path)  
             then return false;
     return true;
 }
 
-process_data_bindings :: (using parser: *Parser) -> bool {
-    return process_node_binding(parser, *dom_root);
+process_data_bindings :: (parser: *Parser) -> bool {
+    return process_node_binding(parser, parser.dom_root);
 }
 
-process_node_binding :: (using parser: *Parser, node: *Node_Field) -> resolved: bool {
+process_node_binding :: (parser: *Parser, node: *Node_Field) -> resolved: bool {
     // We set BINDING_RESOLVED on exit in any case, since we only process each node once, 
     //      and it either succeeds or everything fails.
     if .BINDING_RESOLVED & node.field_flags  return true;
     defer node.field_flags |= .BINDING_RESOLVED; 
     
     if is_aggregate(node) {
-        for node.value.(*Node_Object).fields
+        for get_fields(node)
             if !process_node_binding(parser, it)
                 return false;
     } 
     else if node.binding.value_pointer != null {
-        if !typecheck_node(*script, node) {
-            log(format_error(script.error));
+        if !typecheck_node(parser, node) {
+            log(format_error(parser.error));
             return false;
         }
         
-        value, ok := evaluate_node(*script, node.value);
+        value, ok := evaluate_node(parser, node.value);
         if !ok {
-            log("Error: failed to evaluate expression '%'!", sprint_node(*script, node.value,, temp));
+            log("Error: failed to evaluate expression '%'!", sprint_node(parser, node.value,, temp));
             return false;
         }
         memcpy_any(node.binding, value);
@@ -143,8 +87,9 @@ process_node_binding :: (using parser: *Parser, node: *Node_Field) -> resolved: 
 construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     push_allocator(get_pool_allocator(*script.pool));
     
+    dom_root       = alloc_node(*script, Node_Field);
     dom_root.value = alloc_node(*script, Node_Object);
-    parent := *dom_root;
+    parent := dom_root;
     
     // temporary buffer to put child nodes in
     // will be copied into pool when we step out of object or array
@@ -156,7 +101,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         
         next_token := peek_token(*lexer);
         if next_token.type == .EOF {
-            if parent != *dom_root {
+            if parent != dom_root {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
@@ -520,7 +465,9 @@ evaluation_callback :: (
           case .VALUE; 
             if !process_node_binding(xx script, reference.resolved_field) return Any.{}, false;
             return reference.resolved_field.binding, true;
-          case .INDEX; return to_any(*reference.resolved_field_index), true;
+            
+          case .INDEX; 
+            return to_any(*reference.resolved_field_index), true;
         }
     }
     return Any.{}, true;

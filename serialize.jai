@@ -7,7 +7,7 @@ Serialize_Proc :: #type (*Parser, *Node_Field, *String_Builder, indent: int) -> 
 serialize :: (parser: *Parser, builder: *String_Builder, proc: Serialize_Proc = serialize_dom_nodes_to_gon) -> bool {
     // manually iterate over root node's children
     // we don't want to call serialize_dom_nodes_to_gon() on the root node because we don't actually want to print that node explicitly
-    for get_fields(*parser.dom_root)
+    for get_fields(parser.dom_root)
         if !proc(parser, it, builder, 0)
             return false;
     return true;
