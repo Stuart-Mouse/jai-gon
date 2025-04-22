@@ -436,6 +436,16 @@ before we can really fully integrate the typechecking and evaluation of Gon node
         - we only need to disable things that are expression-level constructs atm, since we will only be calling parse_expression form GON
         - we will only need ot hook into parse_leaf witha callback atm, though maybe later we will need to extend some other parsing proc     
 
+we now have the abiltiy to override the parsing and lexing procedures used by LS
+and we have callbacks for parsing and evaluation
+
+we need to now remove as much code as possible from the gon module and maybe reorganize what's left
+we also need to refactor the evaluation stuff for LS so that the error handling is cleaner
+    also might want to find a way to automate the hint_storage handling
+
+then we can think about making gon objects and arrays work as arbitrary expression values
+    with some added comptime operators for patch/merge type behavior
+
 
 
 

@@ -2,7 +2,12 @@
 // used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     using #as script: Script;
+    
+    // #place script.ast_root;
     dom_root: *Node_Field;
+    
+    #place current_scope;
+        current_parent: *Node_Field;
 };
 
 init_parser :: (parser: *Parser, file: string, use_pool := false) {
@@ -44,64 +49,36 @@ add_data_bindings_to_dom :: (parser: *Parser, bindings: [] struct { binding: Any
 }
 
 process_data_bindings :: (parser: *Parser) -> bool {
-    return process_node_binding(parser, parser.dom_root);
-}
-
-process_node_binding :: (parser: *Parser, node: *Node_Field) -> resolved: bool {
-    // We set BINDING_RESOLVED on exit in any case, since we only process each node once, 
-    //      and it either succeeds or everything fails.
-    if .BINDING_RESOLVED & node.field_flags  return true;
-    defer node.field_flags |= .BINDING_RESOLVED; 
-    
-    if is_aggregate(node) {
-        for get_fields(node)
-            if !process_node_binding(parser, it)
-                return false;
-    } 
-    else if node.binding.value_pointer != null {
-        if !typecheck_node(parser, node) {
-            log(format_error(parser.error));
-            return false;
-        }
-        
-        value, ok := evaluate_node(parser, node.value);
-        if !ok {
-            log("Error: failed to evaluate expression '%'!", sprint_node(parser, node.value,, temp));
-            return false;
-        }
-        memcpy_any(node.binding, value);
+    fields := get_fields(parser.dom_root);
+    for fields {
+        if !typecheck_node(parser, it)  return false;
     }
-    
+    for fields {
+        _, ok := evaluate_node(parser, it);
+        if !ok  return false;
+    }
     return true;
 }
 
 /*
     Construction of the dom is done iteratively instead of recursively, since we can trivially track the current parent node and retrieve it's parent node when we would otherwise return.
     Although, if we ever remove the pointer to parent from DOM nodes, we may go ahead and just make this recursive.
-    
-    TODO: don't require comma after objects or arrays
-          maybe we can just consume the comma in the lexer as an expression-ending delimiter and then 
-          we can remove the need to even check for it here.
-          Maybe we can even just make the comma be whitespace to GON again?
 */
 construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
     push_allocator(get_pool_allocator(*script.pool));
     
+    current_parent = null;
     dom_root       = alloc_node(*script, Node_Field);
+    current_parent = dom_root;
     dom_root.value = alloc_node(*script, Node_Object);
-    parent := dom_root;
+    current_parent = dom_root;
     
-    // temporary buffer to put child nodes in
-    // will be copied into pool when we step out of object or array
-    // children: [..] *Node_Field;
-    // array_reset(*children);
-    
-    while parse_loop := (parent != null) {
+    while parse_loop := (current_parent != null) {
         name_token: Token;
         
         next_token := peek_token(*lexer);
         if next_token.type == .EOF {
-            if parent != dom_root {
+            if current_parent != dom_root {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
@@ -111,7 +88,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         if next_token.type == {
           case .IDENTIFIER; #through;
           case .STRING;
-            if !is_object(parent) {
+            if !is_object(current_parent) {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
@@ -124,43 +101,39 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             }
             
           case .CLOSE_BRACE;
-            if !is_object(parent) {
+            if !is_object(current_parent) {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
             get_token(*lexer);
             expect_token_type(*lexer, .COMMA);
-            // parent.value.(*Node_Object).fields = array_copy(children,, script.allocator);
-            // array_reset_keeping_memory(*children);
-            parent = parent.parent;
-            // script.current_scope = parent;
+            current_parent = current_parent.parent;
             continue;
             
           case .CLOSE_BRACKET;
-            if !is_array(parent) {
+            if !is_array(current_parent) {
                 log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
                 return false;
             }
             get_token(*lexer);
             expect_token_type(*lexer, .COMMA);
-            // parent.value.(*Node_Array).fields = array_copy(children,, script.allocator);
-            // array_reset_keeping_memory(*children);
-            parent = parent.parent;
-            // script.current_scope = parent;
+            current_parent = current_parent.parent;
             continue;
         }
         
         node := alloc_node(*script, Node_Field);
-        node.parent = parent;
+        node.parent = current_parent;
         
         next_token = peek_token(*lexer);
         if next_token.type == {
           case .OPEN_BRACE;
             node.value = alloc_node(*script, Node_Object);
+            node.value.(*Node_Object).parent = node;
             node.location = get_token(*lexer).location;
             
           case .OPEN_BRACKET;
             node.value = alloc_node(*script, Node_Array);
+            node.value.(*Node_Object).parent = node;
             node.location = get_token(*lexer).location;
             
           case;
@@ -185,7 +158,7 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             return false;
         }
         
-        if !is_array(parent) {
+        if !is_array(current_parent) {
             node.name     = name_token.text;
             node.location = name_token.location;
             log("%: %\n", node.location, node.name);
@@ -195,13 +168,11 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             log("%\n", node.location);
         }
         
-        append_child_node(parent, node);
-        // array_add(*children, node);
+        append_child_node(current_parent, node);
         if node.value.node_type == {
           case Node_Object; #through;
           case Node_Array;  
-            parent = node;
-            // script.current_scope = parent;
+            current_parent = node;
         }
     }
     
@@ -291,7 +262,7 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
                         if io_data.enum_index_type 
                             then elem_index = enum_name_to_value(xx io_data.enum_index_type, it.name);
                             else elem_index = to_integer(it.name);
-                        elem_any   := array_add_any_at_index(node.binding, elem_index);
+                        elem_any := array_add_any_at_index(node.binding, elem_index);
                         add_data_binding_to_node(it, elem_any);
                     }
                 } else {
@@ -299,10 +270,7 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
                     array_reserve_nonpoly(xx raw_array, count_before + node_object.fields.count, ti_array.element_type.runtime_size);
                     raw_array.count += node_object.fields.count;
                     for node_object.fields {
-                        elem_any := Any.{
-                            value_pointer = raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size), 
-                            type          = ti_array.element_type
-                        };
+                        elem_any := Any.{ ti_array.element_type, raw_array.data + ((count_before + it_index) * ti_array.element_type.runtime_size) };
                         add_data_binding_to_node(it, elem_any);
                     }
                 }
@@ -452,6 +420,8 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
     return true;
 }
 
+
+
 evaluation_callback :: (
     script:         *Script, 
     node:           *Node,
@@ -463,12 +433,54 @@ evaluation_callback :: (
         reference := node.(*Node_Reference).*;
         if reference.reference_type == {
           case .VALUE; 
-            if !process_node_binding(xx script, reference.resolved_field) return Any.{}, false;
-            return reference.resolved_field.binding, true;
+            result, ok := evaluate_node(xx script, reference.resolved_field);
+            if !ok {
+                log("failed to evaluate reference");
+                return Any.{}, false;
+            }
+            if hint_storage  memcpy(hint_storage, result.value_pointer, result.type.runtime_size);
+            return result, ok;
             
           case .INDEX; 
-            return to_any(*reference.resolved_field_index), true;
+            result := to_any(*reference.resolved_field_index);
+            if hint_storage  memcpy(hint_storage, result.value_pointer, result.type.runtime_size);
+            return result, true;
         }
+        
+        
+      case Node_Field;
+        field := node.(*Node_Field);
+        if field.binding.type == null {
+            log("binding was null for node at %!", node.location);
+            return Any.{}, true;
+        }
+        
+        // early return value if already evaluated
+        if field.field_flags & .EVALUATED  return field.binding, true;
+        defer field.field_flags |= .EVALUATED;
+        
+        value, ok := evaluate_node(script, field.value, field.binding.value_pointer);
+        if !ok {
+            log("Error: failed to evaluate node at %!", node.location);
+            return Any.{}, false;
+        }
+        log("%: %", field.name, field.binding);
+        return field.binding, true;
+        
+        
+      case Node_Array; #through;
+      case Node_Object;
+        assert(node.scope.node_type == Node_Field, "%, %", node.scope.node_type, node.scope == script.ast_root);
+        object := node.(*Node_Object);
+        result := object.parent.binding;
+        for object.fields {
+            _, ok := evaluate_node(script, it, result.value_pointer);
+            if !ok {
+                log("Error: failed to evaluate node at %!", node.location);
+                return Any.{}, false;
+            }
+        }
+        return result, result.value_pointer != null;
     }
     return Any.{}, true;
 }
@@ -492,12 +504,12 @@ typechecking_callback :: (
         // We set the PENDING_DEPENDENCY flag on this node only for the duration of this call
         //      so that we know if we visit it again, we have gone in a loop.
         // TODO: would be better if we explicitly track the dependency chain so that we can print a better error here
-        if field.field_flags & .PENDING_DEPENDENCY {
+        if field.field_flags & .PENDING_TYPECHECK {
             set_general_error(script, "Cyclic dependency on node '%'.", format_node_path(field,, temp));
             return null;
         }
-        field.field_flags |= .PENDING_DEPENDENCY;
-        defer field.field_flags &= ~.PENDING_DEPENDENCY;
+        field.field_flags |= .PENDING_TYPECHECK;
+        defer field.field_flags &= ~.PENDING_TYPECHECK;
         
         value_type := typecheck_node(script, field.value, hint_type = field.binding.type);
         if field.binding.type != value_type {
@@ -554,7 +566,7 @@ typechecking_callback :: (
         }
         
         // jump to referenced node
-        if !typecheck_node(script, reference.resolved_field) return null;
+        if !typecheck_node(script, reference.resolved_field)  return null;
         
         if reference.reference_type == {
           case .VALUE; reference.value_type = reference.resolved_field.binding.type;
@@ -565,7 +577,6 @@ typechecking_callback :: (
                 reference.resolved_field_index = coerce_small_any(hint_type, reference.resolved_field_index);
             }
         }
-        print("reference.value_type: %\n", reference.value_type);
         return reference.value_type;
         
       case;

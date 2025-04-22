@@ -1,16 +1,12 @@
 
 Field_Flags :: enum_flags {
     // parsing flags
-    REFERENCES_RESOLVED;
-    BINDING_RESOLVED;
-    BINDING_ON_PATH;
-
-    
     ARRAY_AS_OBJECT;
     ARRAY_INDEXED;
     ARRAY_ENUMERATED;
     
-    PENDING_DEPENDENCY;
+    PENDING_TYPECHECK;
+    EVALUATED;
     
     // used to mark that we should not try to assign the name of a gon object to the name_member of a struct
     DONT_ASSIGN_NAME;
@@ -31,19 +27,25 @@ Node_Field :: struct {
     field_flags:  Field_Flags;
     
     // still linking field nodes in this manner so that we can more easily insert and append nodes
-    parent, next, prev: *Node_Field;
+    next, prev: *Node_Field;
+    
+    #place scope; parent: *Node_Field;
 }
 
 Node_Object :: struct {
     using #as 
     base:   Node;
     fields: Field_List;
+    
+    #place scope; parent: *Node_Field;
 }
 
 Node_Array :: struct {
     using #as 
     base:   Node;
     fields: Field_List;
+    
+    #place scope; parent: *Node_Field;
 }
 
 Field_List :: struct { 
