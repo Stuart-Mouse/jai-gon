@@ -446,6 +446,10 @@ we also need to refactor the evaluation stuff for LS so that the error handling 
 then we can think about making gon objects and arrays work as arbitrary expression values
     with some added comptime operators for patch/merge type behavior
 
+maybe make arrays work in arbitrary expressions first, since this will be very similar to struct literals
+    main issue will be not being able to provide an explicit type...
+
+
 
 
 

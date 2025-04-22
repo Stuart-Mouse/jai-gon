@@ -20,17 +20,19 @@ load_and_parse_file :: (path: string, code: Code) -> bool #expand {
     }
     defer free(file);
     
-    `parser, parser_ok := parse_file_to_dom(file);
+    `parser, parser_ok := parse_file_to_dom(file, path);
     defer deinit_parser(*parser);
     if !parser_ok {
         log("Unable to parse gon file '%'!", path);
+        log(format_error(parser.error)); 
         return false;
     }
     
     #insert code;
     
     if !process_data_bindings(*parser)  {
-        log("Failed to process data bindings for gon file '%'!", path); 
+        log("Failed to process data bindings for gon file '%'!", path);
+        log(format_error(parser.error)); 
         return false;
     }
     

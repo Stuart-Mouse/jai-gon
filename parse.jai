@@ -10,7 +10,7 @@ Parser :: struct {
         current_parent: *Node_Field;
 };
 
-init_parser :: (parser: *Parser, file: string, use_pool := false) {
+init_parser :: (parser: *Parser, file: string, file_path := "") {
     init_script(*parser.script);
     
     parser.script.my_parse_leaf   = gon_parse_leaf;
@@ -20,7 +20,7 @@ init_parser :: (parser: *Parser, file: string, use_pool := false) {
     parser.script.evaluate_callback  = evaluation_callback;
     register_common_types(*parser.script);
     
-    init_lexer(*parser.lexer, file);
+    init_lexer(*parser.lexer, file, location = .{ file_path, 1, 1 });
 }
 
 deinit_parser :: (parser: *Parser) {
@@ -29,9 +29,9 @@ deinit_parser :: (parser: *Parser) {
 
 // creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
 // after calling this, you can just add your data bindings and then process them
-parse_file_to_dom :: (file: string) -> (Parser, bool) {
+parse_file_to_dom :: (file: string, filepath := "") -> (Parser, bool) {
     parser: Parser;
-    init_parser(*parser, file);
+    init_parser(*parser, file, filepath);
     if !construct_dom_from_gon_file(*parser)  return .{}, false;
     return parser, true;
 }
@@ -88,16 +88,13 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         if next_token.type == {
           case .IDENTIFIER; #through;
           case .STRING;
-            if !is_object(current_parent) {
-                log("GON parse error: Unexpected % token \"%\" at (%:%).", next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
-                return false;
-            }
-            name_token = get_token(*lexer);
-            
-            next_token = get_token(*lexer);
-            if next_token.type != .COLON {
-                log("GON parse error: Expected colon after field name '%', got % \"%\" @ (%:%)", name_token.text, next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
-                return false;
+            if is_object(current_parent) {
+                name_token = get_token(*lexer);
+                next_token = get_token(*lexer);
+                if next_token.type != .COLON {
+                    log("GON parse error: Expected colon after field name '%', got % \"%\" @ (%:%)", name_token.text, next_token.type, next_token.text, next_token.location.line_number, next_token.location.character_number);
+                    return false;
+                }
             }
             
           case .CLOSE_BRACE;
@@ -161,11 +158,8 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
         if !is_array(current_parent) {
             node.name     = name_token.text;
             node.location = name_token.location;
-            log("%: %\n", node.location, node.name);
-            log(node.name);
         } else {
             node.location = node.value.location;
-            log("%\n", node.location);
         }
         
         append_child_node(current_parent, node);
@@ -456,7 +450,7 @@ evaluation_callback :: (
         
         if field.binding.type == null {
             log("binding was null for node at %!", node.location);
-            return Null_Any;
+            return Void_Any;
         }
         
         evaluate_node(script, field.value, field.binding.value_pointer);
@@ -489,35 +483,40 @@ typechecking_callback :: (
     if node.node_type == {
       case Node_Field;
         field := node.(*Node_Field);
-        if field.binding.type == null  return null;
         
-        defer_restore(*current_scope);
-        current_scope = field;
+        if field.binding.type == null {
+            field.value_type = type_info(void);
+            return field.value_type;
+        }
         
         // We set the PENDING_DEPENDENCY flag on this node only for the duration of this call
         //      so that we know if we visit it again, we have gone in a loop.
         // TODO: would be better if we explicitly track the dependency chain so that we can print a better error here
         if field.field_flags & .PENDING_TYPECHECK {
-            set_general_error(script, "Cyclic dependency on node '%'.", format_node_path(field,, temp));
+            set_general_error(script, "Cyclic dependency on node '%'.", format_node_path(field,, temp), loc = node.location);
             return null;
         }
         field.field_flags |= .PENDING_TYPECHECK;
         defer field.field_flags &= ~.PENDING_TYPECHECK;
         
+        defer_restore(*current_scope);
+        current_scope = field;
+        
         value_type := typecheck_node(script, field.value, hint_type = field.binding.type);
+        if !value_type  return null;
         if field.binding.type != value_type {
-            set_general_error(script, "Mismatched types on field binding and value expression.", /*as_type(field.binding.type), as_type(value_type),*/);
+            set_general_error(script, "Mismatched types on field binding and value expression." /*as_type(field.binding.type), as_type(value_type),*/, loc = node.location);
             return null;
         }
+        
         field.value_type = field.binding.type;
-        print("field.binding.type: %\n", field.binding.type);
         return field.value_type;
         
         
       case Node_Object;
         object := node.(*Node_Object);
         if hint_type == null {
-            set_typecheck_error(script, "Missing type hint on Node_Object.", node = node, type = .MISSING_TYPE_HINT);
+            set_typecheck_error(script, "Missing type hint on Node_Object.", node = node, type = .MISSING_TYPE_HINT, loc = node.location);
             return null;
         }
         object.value_type = hint_type;
@@ -530,7 +529,7 @@ typechecking_callback :: (
       case Node_Array;
         array := node.(*Node_Array);
         if hint_type == null {
-            set_typecheck_error(script, "Missing type hint on Node_Array.", node = node, type = .MISSING_TYPE_HINT);
+            set_typecheck_error(script, "Missing type hint on Node_Array.", node = node, type = .MISSING_TYPE_HINT, loc = node.location);
             return null;
         }
         array.value_type = hint_type;
@@ -546,7 +545,7 @@ typechecking_callback :: (
         
         resolved_field, resolved_index := find_node_by_path(xx script, field.parent, reference.field_path);
         if resolved_field == null {
-            set_typecheck_error(script, "Unable to resolve referenced node path '%'.", reference.field_path, node = node);
+            set_typecheck_error(script, "Unable to resolve referenced node path '%'.", reference.field_path, node = node, loc = node.location);
             return null; 
         }
         reference.resolved_field = resolved_field;
@@ -599,7 +598,7 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
           case "$";
             string_token := get_token(*lexer);
             if string_token.type != .STRING {
-                set_parse_error(script, "%: expected a path string after node reference operator.", string_token.location);
+                set_parse_error(script, "Expected a path string after node reference operator.", loc = string_token.location);
                 return null;
             }
             return make_reference(script, .VALUE, string_token.text);
@@ -607,7 +606,7 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
           case "&";
             string_token := get_token(*lexer);
             if string_token.type != .STRING {
-                set_parse_error(script, "%: expected a path string after node reference operator.", string_token.location);
+                set_parse_error(script, "Expected a path string after node reference operator.", loc = string_token.location);
                 return null;
             }
             return make_reference(script, .INDEX, string_token.text);
@@ -625,7 +624,7 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
             identifier := make_identifier(script, token_after_dot);
             return make_dot(script, token, null, identifier);
         }
-        else set_parse_error(script, "%: unexpected % token '%' after unary dot.", token_after_dot.location, token_after_dot.type, token_after_dot.text);
+        else set_parse_error(script, "Unexpected % token '%' after unary dot.", token_after_dot.type, token_after_dot.text, loc = token_after_dot.location);
 
         
       case .OPEN_PAREN;
@@ -637,7 +636,7 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
         
         close_paren_token := get_token(*lexer);
         if close_paren_token.type != .CLOSE_PAREN {
-            set_parse_error(script, "%: expected a closing paren for open paren at %.", close_paren_token.location, open_paren_location);
+            set_parse_error(script, "Expected a closing paren for open paren at %.", open_paren_location, loc = close_paren_token.location);
             return null;
         }
         return expression;
@@ -662,13 +661,13 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
             }
         }
         if directive.directive_index == -1 {
-            set_parse_error(script, "%: Unable to resolve directive '%'\n", directive.location, directive.name);
+            set_parse_error(script, "Unable to resolve directive '%'\n", directive.name, loc = directive.location);
             return null;
         }
         
         open_paren_token := get_token(*lexer);
         if open_paren_token.type != .OPEN_PAREN {
-            set_parse_error(script, "%: Error, expected an open paren after directive name!\n", open_paren_token.location);
+            set_parse_error(script, "Expected an open paren after directive name!\n", loc = open_paren_token.location);
             return null;
         }
         
@@ -679,13 +678,13 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
             
             close_paren_token := get_token(*lexer);
             if close_paren_token.type != .CLOSE_PAREN {
-                set_parse_error(script, "%: expected a closing paren after arguments of directive. Instead we saw %\n", close_paren_token.location, close_paren_token.text);
+                set_parse_error(script, "Expected a closing paren after arguments of directive. Instead we saw %\n", close_paren_token.text, loc = close_paren_token.location);
                 return null;
             }
         }
         
         if !evaluate_directive(script, directive, .PARSE) {
-            set_parse_error(script, "%: failed while trying to execute a directive during parsing.", token.location);
+            set_parse_error(script, "Failed while trying to execute a directive during parsing.", loc = token.location);
             return null;
         }
         return directive;
@@ -720,7 +719,7 @@ gon_parse_binary :: (using script: *Script, left: *Node, min_prec: int) -> *Node
             type_expr := my_parse_expression(script, 0);
             close_paren := get_token(*lexer);
             if close_paren.type != .CLOSE_PAREN {
-                set_parse_error(script, "%: unexpected token '%' in cast type expression. Expected a closing paren.", close_paren.location, close_paren.type);
+                set_parse_error(script, "Unexpected token '%' in cast type expression. Expected a closing paren.", close_paren.type, loc = close_paren.location);
                 return null;
             }
             return make_cast(script, dot_token, left, type_expr);
@@ -730,7 +729,7 @@ gon_parse_binary :: (using script: *Script, left: *Node, min_prec: int) -> *Node
             return make_dot(script, dot_token, left, identifier);
         }
         
-        set_parse_error(script, "%: unexpected % token '%' after dot.", token.location, token.type, token.text);
+        set_parse_error(script, "Unexpected % token '%' after dot.", token.type, token.text, loc = token.location);
         return null;
         
         

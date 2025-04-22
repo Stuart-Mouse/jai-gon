@@ -32,7 +32,7 @@ main :: () {
         }
         flags: Flags;
 
-        io_data := table_add(*IO_Data_Lookup, type_info(Thing), .{
+        add_io_data(Thing, .{
             name_member = get_field(type_info(Thing), "name"),
         });
 
