@@ -54,8 +54,8 @@ process_data_bindings :: (parser: *Parser) -> bool {
         if !typecheck_node(parser, it)  return false;
     }
     for fields {
-        _, ok := evaluate_node(parser, it);
-        if !ok  return false;
+        evaluate_node(parser, it);
+        LS.maybe_return_error(parser, false);
     }
     return true;
 }
@@ -420,69 +420,62 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
     return true;
 }
 
-
-
+// NOTE: Since fields all store their own bindings, we have no need to use the standard hint_storage mechanism for fields and objects.
 evaluation_callback :: (
     script:         *Script, 
     node:           *Node,
     hint_storage:   *void    = null,
     explicit_call := false
-) -> Any, bool {
+) -> Any {
     if node.node_type == {
       case Node_Reference;
         reference := node.(*Node_Reference).*;
+        
+        result: Any;
         if reference.reference_type == {
           case .VALUE; 
-            result, ok := evaluate_node(xx script, reference.resolved_field);
-            if !ok {
-                log("failed to evaluate reference");
-                return Any.{}, false;
-            }
-            if hint_storage  memcpy(hint_storage, result.value_pointer, result.type.runtime_size);
-            return result, ok;
+            evaluate_node(xx script, reference.resolved_field);
+            LS.maybe_return_error(script, Null_Any);
+            result = reference.resolved_field.binding;
             
           case .INDEX; 
-            result := to_any(*reference.resolved_field_index);
-            if hint_storage  memcpy(hint_storage, result.value_pointer, result.type.runtime_size);
-            return result, true;
+            result = to_any(*reference.resolved_field_index);
         }
+        if hint_storage != null {
+            memcpy(hint_storage, result.value_pointer, result.type.runtime_size);
+        }
+        return result;
         
         
       case Node_Field;
+        assert(hint_storage == null);
         field := node.(*Node_Field);
-        if field.binding.type == null {
-            log("binding was null for node at %!", node.location);
-            return Any.{}, true;
-        }
         
-        // early return value if already evaluated
-        if field.field_flags & .EVALUATED  return field.binding, true;
+        if field.field_flags & .EVALUATED  return field.binding;
         defer field.field_flags |= .EVALUATED;
         
-        value, ok := evaluate_node(script, field.value, field.binding.value_pointer);
-        if !ok {
-            log("Error: failed to evaluate node at %!", node.location);
-            return Any.{}, false;
+        if field.binding.type == null {
+            log("binding was null for node at %!", node.location);
+            return Null_Any;
         }
-        log("%: %", field.name, field.binding);
-        return field.binding, true;
+        
+        evaluate_node(script, field.value, field.binding.value_pointer);
+        LS.maybe_return_error(script, Null_Any);
+        return Void_Any;
         
         
       case Node_Array; #through;
       case Node_Object;
         assert(node.scope.node_type == Node_Field, "%, %", node.scope.node_type, node.scope == script.ast_root);
         object := node.(*Node_Object);
-        result := object.parent.binding;
         for object.fields {
-            _, ok := evaluate_node(script, it, result.value_pointer);
-            if !ok {
-                log("Error: failed to evaluate node at %!", node.location);
-                return Any.{}, false;
-            }
+            evaluate_node(script, it);
+            LS.maybe_return_error(script, Null_Any);
         }
-        return result, result.value_pointer != null;
+        return object.parent.binding;
     }
-    return Any.{}, true;
+    
+    return Null_Any;
 }
 
 typechecking_callback :: (
@@ -596,7 +589,7 @@ make_reference :: (script: *Script, type: Reference_Type, path: string) -> *Node
 // Custom versions of parse_leaf and parse_binary are implemented here to remove some of the LS features which we do not want to use in GON.
 
 gon_parse_leaf :: (using script: *Script) -> *Node {
-    token := get_token_or_return(*lexer, null);
+    token := get_token(*lexer);
     
     is_operator, operator_type, precedence := token_is_operator(token, expect_unary = true);
     if is_operator && operator_type == .UNARY {
@@ -705,16 +698,14 @@ gon_parse_leaf :: (using script: *Script) -> *Node {
     return null;
 }
 
-// If we hit a binary operator but its precedence is too low, we return left back to caller.
 gon_parse_binary :: (using script: *Script, left: *Node, min_prec: int) -> *Node {
     token := peek_token(*lexer);
     
-    // should this go here or up in main loop of parse_expression?
-    // will require some refactoring to hoist up there
+    // In addition to normal binary operators, we have a few binary-operator-like constructs that have essentially infinite operator precedence.
+    // These are open parenthesis for procedure calls, dot for struct member access and cast, and open bracket for array indexing.
     if token.type == {
       case .OPEN_PAREN;
         get_token(*lexer);
-        
         arg_exprs, ok := parse_procedure_arguments(script);
         return make_procedure_call(script, token, left, arg_exprs);
         
@@ -752,6 +743,8 @@ gon_parse_binary :: (using script: *Script, left: *Node, min_prec: int) -> *Node
         return make_subscript(script, open_bracket_token, left, indexing_expr);
     }
     
+    // We only consume the binary operator here if it is of a higher precedence than the previous binary operator.
+    // If we hit a binary operator but its precedence is too low, we return left back to caller.
     is_operator, operator_type, precedence := token_is_operator(token);
     if is_operator && operator_type != .UNARY {
         if precedence <= min_prec  return left;

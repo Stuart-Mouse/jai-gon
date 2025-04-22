@@ -47,7 +47,10 @@ main :: () {
         add_data_binding_to_dom(*parser, things, "things");
         add_data_binding_to_dom(*parser, flags, "flags");
 
-        if !process_data_bindings(*parser)  return;
+        if !process_data_bindings(*parser) {
+            log(format_error(parser.error));
+            return;
+        }
         
         // SERIALIZATION TEST
         // insert_data_node(*parser, "things", things);
