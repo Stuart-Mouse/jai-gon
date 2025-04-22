@@ -55,7 +55,7 @@ process_data_bindings :: (parser: *Parser) -> bool {
     }
     for fields {
         evaluate_node(parser, it);
-        LS.maybe_return_error(parser, false);
+        if !!parser.error  return false;
     }
     return true;
 }
@@ -435,7 +435,7 @@ evaluation_callback :: (
         if reference.reference_type == {
           case .VALUE; 
             evaluate_node(xx script, reference.resolved_field);
-            LS.maybe_return_error(script, Null_Any);
+            if !!script.error  return Null_Any;
             result = reference.resolved_field.binding;
             
           case .INDEX; 
@@ -460,7 +460,7 @@ evaluation_callback :: (
         }
         
         evaluate_node(script, field.value, field.binding.value_pointer);
-        LS.maybe_return_error(script, Null_Any);
+        if !!script.error  return Null_Any;
         return Void_Any;
         
         
@@ -470,7 +470,7 @@ evaluation_callback :: (
         object := node.(*Node_Object);
         for object.fields {
             evaluate_node(script, it);
-            LS.maybe_return_error(script, Null_Any);
+            if !!script.error  return Null_Any;
         }
         return object.parent.binding;
     }
