@@ -707,6 +707,7 @@ gon_parse_binary :: (using script: *Script, left: *Node, min_prec: int) -> *Node
       case .OPEN_PAREN;
         get_token(*lexer);
         arg_exprs, ok := parse_procedure_arguments(script);
+        if !ok  return null;
         return make_procedure_call(script, token, left, arg_exprs);
         
         
