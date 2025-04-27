@@ -118,6 +118,12 @@ construct_dom_from_gon_file :: (using parser: *Parser) -> bool {
             continue;
         }
         
+        // need a better check, will be trivial after refactoring parsing later...
+        if is_object(current_parent) && !name_token.type {
+            set_parse_error(parser, "Expected a field name, but saw this instead: %", next_token.text);
+            return false;
+        }
+        
         node := alloc_node(*script, Node_Field);
         node.parent = current_parent;
         
@@ -270,7 +276,7 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
                 }
             } else { // .FIXED and .VIEW
                 io_data := get_io_data(node.binding.type);
-
+                
                 elem_count, data := get_array_count_and_data(node.binding.value_pointer, ti_array);
                 
                 if .ARRAY_INDEXED & node.field_flags {
