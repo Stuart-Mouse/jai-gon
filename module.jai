@@ -195,10 +195,11 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 #import "Basic";
 #import "Reflection";
 #import "String";
-#import "Hash_Table";
+using,except(next_power_of_two) Hash_Table :: #import "Hash_Table";
 #import "Flat_Pool";
 
 #import "Data_Packer";
+#import "Utils";
 
 #load "dom.jai";
 #load "parse.jai";
