@@ -348,7 +348,7 @@ add_data_binding_to_node :: (node: *Node_Field, binding: Any) -> bool  {
                 };
                 add_data_binding_to_node(it, member_any);
             }
-                
+            
           case .ARRAY;
             ti_array := node.binding.type.(*Type_Info_Array);
             
@@ -461,6 +461,9 @@ evaluation_callback :: (
         
         evaluate_node(script, field.value, field.binding.value_pointer);
         if !!script.error  return Null_Any;
+        if field.binding.type.type == .STRING {
+            field.binding.value_pointer.(*string).* = copy_string(field.binding.value_pointer.(*string).*);
+        }
         return Void_Any;
         
         
