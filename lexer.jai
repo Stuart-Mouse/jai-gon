@@ -6,7 +6,7 @@ whitespace_and_reserved_chars :: #run join(whitespace_chars, reserved_chars);
 Token :: struct {
     type:       Token_Type;
     text:       string;
-    location:   Source_Location;
+    location:   Source_Code_Location;
 }
 
 Token_Type :: enum u8 {
@@ -25,30 +25,26 @@ Token_Type :: enum u8 {
     REF_VALUE;
 }
 
-Source_Location :: struct {
-    line, char: int;
-}
-
-Tokenizer :: struct {
+Lexer :: struct {
     file:               string;
     next_token:         Token;
-    cursor_location:    Source_Location;
+    cursor_location:    Source_Code_Location;
 }
 
-init_tokenizer :: (using t: *Tokenizer) {
-    cursor_location = .{ line = 1, char = 1 };
+init_tokenizer :: (using t: *Lexer, filepath := "") {
+    cursor_location = .{ line_number = 1, character_number = 1, fully_pathed_filename = filepath };
     get_token(t);
 }
 
-get_token_or_return :: (using t: *Tokenizer, code: Code) -> Token #expand {
+get_token_or_return :: (using t: *Lexer, code: Code) -> Token #expand {
     token := get_token(t);
     if token.type == .ERROR  `return #insert code;
     return token;
 }
 
-get_token :: inline (using t: *Tokenizer) -> Token {
+get_token :: inline (using t: *Lexer) -> Token {
     if next_token.type == .ERROR {
-        log("TOKENIZER ERROR: % (line %, char %)\n", next_token.text, next_token.location.line, next_token.location.char);
+        log("%:(%,%): GON Lexer Error - %", next_token.location.fully_pathed_filename, next_token.location.line_number, next_token.location.character_number, next_token.text);
         return next_token;
     }
     
@@ -57,12 +53,12 @@ get_token :: inline (using t: *Tokenizer) -> Token {
     return current_token;
 }
 
-peek_token :: inline (using t: *Tokenizer) -> Token {
+peek_token :: inline (using t: *Lexer) -> Token {
     return next_token;
 }
 
 // consumes token if it was expected type, else it was just peeked
-expect_token_type :: (using t: *Tokenizer, type: Token_Type) -> bool {
+expect_token_type :: (using t: *Lexer, type: Token_Type) -> bool {
     token := peek_token(t);
     if token.type == type {
         get_token(t);
@@ -72,7 +68,7 @@ expect_token_type :: (using t: *Tokenizer, type: Token_Type) -> bool {
 }
 
 // mutates the passed string, advancing it to the position after the returned token
-lex_next_token :: (using t: *Tokenizer) -> Token {
+lex_next_token :: (using t: *Lexer) -> Token {
     if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
     
     location := cursor_location;
@@ -135,7 +131,7 @@ lex_next_token :: (using t: *Tokenizer) -> Token {
 
 
 // cycles between skipping whitespace and comments until next character is neither
-skip_whitespace_and_comments :: (using t: *Tokenizer) -> bool {
+skip_whitespace_and_comments :: (using t: *Lexer) -> bool {
     if file.count == 0 return false;
     while true {
         while is_whitespace(file[0]) {
@@ -162,15 +158,15 @@ is_whitespace :: inline (char: u8) -> bool {
 
 #scope_module
 
-advance :: inline (using t: *Tokenizer, amount := 1) -> bool {
+advance :: inline (using t: *Lexer, amount := 1) -> bool {
     _amount := min(amount, file.count);
     
     for 0.._amount-1 {
         if file[it] == #char "\n" {
-            cursor_location.line += 1;
-            cursor_location.char  = 1;
+            cursor_location.line_number += 1;
+            cursor_location.character_number = 1;
         } else {
-            cursor_location.char += 1;
+            cursor_location.character_number += 1;
         }
     }
     

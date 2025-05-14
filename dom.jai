@@ -1,5 +1,5 @@
 
-DOM_Node_Flags :: enum_flags {
+Node_Flags :: enum_flags {
     // parsing flags
     REFERENCES_RESOLVED;
     BINDING_RESOLVED;
@@ -22,56 +22,56 @@ DOM_Node_Flags :: enum_flags {
     SAME_LINE;
 }
 
-DOM_Node_Ref_Type :: enum { 
+Reference_Type :: enum { 
     VALUE; 
     POINTER; 
     INDEX; 
 };
 
 Node_Type :: enum { 
-    INVALID :: 0;
-    FIELD   :: 1;
-    OBJECT  :: 2;
-    ARRAY   :: 3;
-    REF     :: 4;
+    UNINITIALIZED :: 0;
+    FIELD         :: 1;
+    OBJECT        :: 2;
+    ARRAY         :: 3;
+    REFERENCE     :: 4;
 }
 
 // this struct is kinda big
 // maybe we optimize this later, but for now just making it work
-DOM_Node :: struct {
-    parent, next, prev: *DOM_Node;
+Node :: struct {
+    parent, next, prev: *Node;
     
     name:               string;
     type:               Node_Type;
-    flags:              DOM_Node_Flags;
+    flags:              Node_Flags;
+    source_location:    Source_Code_Location;
     data_binding:       Any;
-    source_location:    Source_Location;
     
     using content: union {
-        ref: struct {
-            path:   string;
-            node:   *DOM_Node;
-            type:   DOM_Node_Ref_Type;
-        };
+        // reference: struct {
+        //     path:   string;
+        //     node:   *Node;
+        //     type:   Node_Ref_Type;
+        // };
         value:      string;
-        children:   DOM_Node_List;
+        children:   Node_List;
     };
 }
 
-DOM_Node_List :: struct { 
-    first:  *DOM_Node;
-    last:   *DOM_Node;
+Node_List :: struct { 
+    first:  *Node;
+    last:   *Node;
     count:  int;
 };
 
-for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {
+for_expansion :: (list: *Node_List, body: Code, flags: For_Flags) #expand {
     #if flags & .REVERSE {
         `it_index := list.count;
         `it := list.last;
         while it {
             prev := it.prev;
             defer { it = prev; it_index -= 1; }
-            #insert(remove={remove_node(it,, `node_allocator);}) body;
+            #insert(remove={remove_node(it);}) body;
         }
     } else {
         `it_index := 0;
@@ -79,19 +79,19 @@ for_expansion :: (list: *DOM_Node_List, body: Code, flags: For_Flags) #expand {
         while it {
             next := it.next;
             defer { it = next; it_index += 1; }
-            #insert(remove={remove_node(it,, `node_allocator);}) body;
+            #insert(remove={remove_node(it);}) body;
         }
     }
 }
 
 
-Node_Insertion_Behaviour :: enum {
+Node_Insert_Mode :: enum {
     DEFAULT;        // just insert nodes with no extra checks
     OVERWRITE;      // overwrite existing nodes with the same name
     UNDERWRITE;     // don't insert node if one with the same name already exists
 }
 
-get_node_index :: (node: *DOM_Node) -> int {
+get_node_index :: (node: *Node) -> int {
     index := 0;
     n := node.prev;
     while n != null {
@@ -101,19 +101,9 @@ get_node_index :: (node: *DOM_Node) -> int {
     return index;
 }
 
-// does not delete the passed node or its neighbors, only children
-delete_child_nodes_recursive :: (node: *DOM_Node) {
-    if node.type == .OBJECT || node.type == .ARRAY {
-        for child: node.children {
-            delete_child_nodes_recursive(child);
-            free(child);
-        }
-    }
-}
-
 // TODO: add ability to index array nodes?
 // relative path only
-find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
+find_node_by_path :: (node: *Node, path: string) -> (*Node, int) {
     if !path  return node, get_node_index(node);
     _path := path;
     index := 0;
@@ -131,14 +121,14 @@ find_node_by_path :: (node: *DOM_Node, path: string) -> (*DOM_Node, int) {
 }
 
 // relative or absolute path
-find_node_by_path :: (parser: *Parser, node: *DOM_Node, path: string) -> (*DOM_Node, int) {
+find_node_by_path :: (parser: *Parser, node: *Node, path: string) -> (*Node, int) {
     if !path  return node, get_node_index(node);
     _path := path;
     if !_path return null, -1;
     search_from_node := node;
     if _path[0] == #char "/" {
         advance(*_path);
-        search_from_node = parser.dom_root;
+        search_from_node = parser.root_node;
     }
     ret, idx := find_node_by_path(search_from_node, _path);
     return ret, idx;
@@ -146,7 +136,7 @@ find_node_by_path :: (parser: *Parser, node: *DOM_Node, path: string) -> (*DOM_N
 
 
 // will return null if not found
-find_child_node_by_name :: (parent: *DOM_Node, name: string) -> (*DOM_Node, int) {
+find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
     if parent.type != .OBJECT && parent.type != .ARRAY {
         return null, -1;
     }
@@ -158,7 +148,7 @@ find_child_node_by_name :: (parent: *DOM_Node, name: string) -> (*DOM_Node, int)
     return null, -1;
 }
 
-append_data_node :: (parent: *DOM_Node, path: string, data_binding: Any, prepend: bool = false) ->  *DOM_Node {    
+append_data_node :: (parent: *Node, path: string, data_binding: Any, prepend: bool = false) ->  *Node {    
     node := append_node_with_path(parent, path, prepend = prepend);
     if node == null  return node;
     
@@ -175,8 +165,8 @@ append_data_node :: (parent: *DOM_Node, path: string, data_binding: Any, prepend
 
 // does the bare minimum to append a node, not even giving it a name
 // after the node is appended, caller should initialize it
-append_child_node :: (parent: *DOM_Node, prepend := false) ->  *DOM_Node {
-    node := New(DOM_Node);
+append_child_node :: (parent: *Node, prepend := false) ->  *Node {
+    node := New(Node);
     // if !node return null;
     
     node.parent = parent;
@@ -207,9 +197,9 @@ append_child_node :: (parent: *DOM_Node, prepend := false) ->  *DOM_Node {
     return node;
 }
 
-// may be a little bit odd, but if you want tell if a node was overwritten or not, check if type == .INVALID. if so, then the node was either created or overwritten
-get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend := false) ->  *DOM_Node {
-    node: *DOM_Node;
+// may be a little bit odd, but if you want tell if a node was overwritten or not, check if type == .UNINITIALIZED. if so, then the node was either created or overwritten
+get_or_add_child_node :: (parent: *Node, name: string, behavior: Node_Insert_Mode = .DEFAULT, prepend := false) ->  *Node {
+    node: *Node;
     
     if behavior != .DEFAULT {
         node = find_child_node_by_name(parent, name);
@@ -226,7 +216,7 @@ get_or_add_child_node :: (parent: *DOM_Node, name: string, behavior: Node_Insert
     return node;
 }
 
-append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insertion_Behaviour = .DEFAULT, prepend: bool = false) -> *DOM_Node {
+append_node_with_path :: (parent: *Node, path: string, behavior: Node_Insert_Mode = .DEFAULT, prepend: bool = false) -> *Node {
     node := parent;
     _path := path;
     while true {
@@ -251,18 +241,15 @@ append_node_with_path :: (parent: *DOM_Node, path: string, behavior: Node_Insert
     return null;
 }
 
-remove_node :: (node: *DOM_Node) {
+remove_node :: (node: *Node) {
     node.parent.children.count -= 1;
-    if node.next != null          node.next.prev    = node.prev;
-    if node.prev != null          node.prev.next    = node.next;
+    if node.next != null  node.next.prev = node.prev;
+    if node.prev != null  node.prev.next = node.next;
     if node.parent.children.first == node  node.parent.children.first = node.next;
     if node.parent.children.last  == node  node.parent.children.last  = node.prev;
-    delete_child_nodes_recursive(node);
-    free(node);
 }
 
-
-clone_child_nodes_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
+clone_child_nodes_recursive :: (dst: *Node, src: *Node) -> bool {
     for child: src.children {
         node := append_child_node(dst, false);
         if !clone_node_recursive(node, child)  return false;
@@ -270,24 +257,19 @@ clone_child_nodes_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
     return true;
 }
 
-clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {    
-    // free child nodes so we can overwrite
-    if dst.type == .OBJECT {
-        delete_child_nodes_recursive(dst);
-    }
-    
+clone_node_recursive :: (dst: *Node, src: *Node) -> bool {    
     dst.name         = src.name;
     dst.type         = src.type;
     dst.flags        = src.flags;
     dst.data_binding = src.data_binding;
     dst.content      = .{};
-
+    
     if src.type == {
       case .OBJECT; #through;
       case .ARRAY;
         return clone_child_nodes_recursive(dst, src);
         
-      case .REF;
+      case .REFERENCE;
         dst.ref = src.ref;
         if dst.ref.type == .VALUE {
             log_error("ERROR: cloned a value ref node @ %v", format_node_path(dst));
@@ -296,21 +278,21 @@ clone_node_recursive :: (dst: *DOM_Node, src: *DOM_Node) -> bool {
       case .FIELD;
         dst.value = src.value;
         
-      case .INVALID;
+      case .UNINITIALIZED;
         return false;
     }
     
     return true;
 }
 
-format_node_path :: (node: *DOM_Node) -> string {
+format_node_path :: (node: *Node) -> string {
     builder: String_Builder;
     init_string_builder(*builder);
     append_node_path_to_string_builder(*builder, node);
     return builder_to_string(*builder);
 }
 
-append_node_path_to_string_builder :: (builder: *String_Builder, node: *DOM_Node) {
+append_node_path_to_string_builder :: (builder: *String_Builder, node: *Node) {
     if node.parent != null {
         append_node_path_to_string_builder(builder, node.parent);
         append(builder, "/");

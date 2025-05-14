@@ -1,85 +1,30 @@
-// DATA SEGMENT
 
-INDENTATION_STRING :: "    ";
-
-Serializer :: struct {
-    builder:        String_Builder;
-    format:         File_Format;
-    indent:         int;
-    
-    dom_root:       *DOM_Node;
-    do_free_nodes:  bool;
-    
-    // event_handler : SAX_Event_Handler,
-    
-    // only used for allocating dom nodes, not used for string builder atm. may store a separate allocator for that
-    allocator:      Allocator; 
-}
-
-
-File_Format :: enum {
-    GON;
-    JSON;
-}
-
-// INTERFACE PROCEDURES
-
-init_serializer :: (serializer: *Serializer, root: *DOM_Node = null, allocator: Allocator  = .{}) {
-    serializer.allocator = allocator;
-    
-    if root != null {
-        serializer.dom_root = root;
-    } else {
-        serializer.dom_root = New(DOM_Node,, allocator = allocator);
-        serializer.dom_root.* = .{ 
-            name = "root",
-            type = .OBJECT,
-        };
-        serializer.do_free_nodes = true;
-    }
-}
-
-destroy_serializer :: (using serializer: *Serializer) {
-    if do_free_nodes {
-        // delete_child_nodes_recursive(dom_root);
-        free(dom_root,, allocator);
-    }
-}
-
-// serializes to the serializer's internal string builder
+// serializes to the parser's internal string builder
 // user will still need to write the constructed string out to a file
-serialize :: (using serializer: *Serializer) -> bool {
-    if serializer == null  return false;
-    if dom_root   == null  return false;
+serialize :: (using parser: *Parser) -> bool {
+    if parser.root_node == null  
+        return false;
     
-    serialize_proc: #type (using serializer: *Serializer, node: *DOM_Node) -> bool;
-    if serializer.format == {
-        case .GON;  serialize_proc = serialize_dom_nodes_to_gon;
-        // case .JSON; serialize_proc = serialize_dom_nodes_to_json;
-    }
-    
-    // manually iterate over root node's children
-    // we don't want to call serialize_dom_nodes_to_gon() on the root node because we don't actually want to print that node explicitly
-    for child: dom_root.children 
-        if !serialize_proc(serializer, child)
-            then return false;
+    for root_node.children 
+        if !serialize_node(parser, it)
+            return false;
     
     return true;
 }
 
-serialize_to_string :: (using serializer: *Serializer) -> (result: string, ok: bool) {
-    if !serialize(serializer)  return "", false;
-    return builder_to_string(*serializer.builder), true;
+serialize_to_string :: (using parser: *Parser) -> (result: string, ok: bool) {
+    if !serialize(parser)  return "", false;
+    return builder_to_string(*parser.builder), true;
 }
 
-serialize_to_file :: (using serializer: *Serializer, file_path: string) -> bool {
-    if !serialize(serializer)  return false;
-    write_entire_file(file_path, builder_to_string(*serializer.builder));
+serialize_to_file :: (using parser: *Parser, file_path: string) -> bool {
+    if !serialize(parser)  return false;
+    write_entire_file(file_path, builder_to_string(*parser.builder));
     return true;
 }
 
-serializer_insert_data_binding :: (serializer: *Serializer, path: string, binding: Any, prepend: bool = false) {
-    append_data_node(serializer.dom_root, path, binding, prepend);
+serializer_insert_data_binding :: (parser: *Parser, path: string, binding: Any, prepend: bool = false) {
+    append_data_node(parser.root_node, path, binding, prepend);
 }
 
 
@@ -88,8 +33,8 @@ serializer_insert_data_binding :: (serializer: *Serializer, path: string, bindin
 // We could convert this to an iterative process rather than a recursive one relatively easily,
 //      because we don't currently have any need to use the stack to hold state.
 // May be worth considering later once functionality is more complete.
-serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -> bool {
-    if serializer == null || node == null  return false;
+serialize_node :: (using parser: *Parser, node: *Node) -> bool {
+    if parser == null || node == null  return false;
     
     in_array       := false;
     is_first_child := false;
@@ -138,7 +83,7 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
         // recurse for children
         indent += 1;
         for child: node.children 
-            if !serialize_dom_nodes_to_gon(serializer, child)  
+            if !serialize_node(parser, child)  
                 then return false;
         indent -= 1;
         
@@ -162,82 +107,22 @@ serialize_dom_nodes_to_gon :: (using serializer: *Serializer, node: *DOM_Node) -
         }
         append(*builder, to_conformant_string(node.value,, allocator = temp));
         
-      case .REF;
-        if node.ref.type == {
-            case .INDEX   ; print_to_builder(*builder, "%", get_node_index(node.ref.node));
-            case .POINTER ; print_to_builder(*builder, "*\"%\"", node.ref.path);
-            case .VALUE   ; assert(false, "Cannot print a value node."); // should not occur
-        }
-            
+      // case .REFERENCE;
+      //   if node.ref.type == {
+      //       case .INDEX;    print_to_builder(*builder, "%", get_node_index(node.ref.node));
+      //       case .POINTER;  print_to_builder(*builder, "*\"%\"", node.ref.path);
+      //       case .VALUE;    assert(false, "Cannot print a value node."); // should not occur
+      //   }
     }
     
     return true;
 }
 
-// serialize_dom_nodes_to_json :: (using serializer: *Serializer, node: *DOM_Node) -> bool {
-//     if serializer == null || node == null do return false
-    
-//     in_array := node.parent != null && node.parent.type == .ARRAY
-    
-//     is_first_child := node.parent != null && node == node.parent.first
-    
-//     if !is_first_child {
-//         append(*builder, ",")
-//     }
-//     append(*builder, "\n")
-//     for i in 0..<indent do append(*builder, INDENTATION_STRING);
-    
-//     if !in_array {
-//         append(*builder, 
-//             to_conformant_string(node.name, allocator = context.temp_allocator, force_quotes = true),
-//         )
-//         append(*builder, ": ")
-//     }
-    
-//     #partial switch node.type {
-//         case .OBJECT, .ARRAY: 
-//             is_array := node.type == .ARRAY
-            
-//             append(*builder, is_array ? "[" : "{")
-            
-//             // recurse for children
-//             indent += 1
-//             child := node.children.first
-//             for child != null {
-//                 if !serialize_dom_nodes_to_json(serializer, child) {
-//                     return false
-//                 }
-//                 child = child.next
-//             }
-//             indent -= 1
-            
-//             append(*builder, "\n")
-//             for i in 0..<indent do append(*builder, INDENTATION_STRING)
-            
-//             append(*builder, is_array ? "]" : "}")
-            
-//         case .FIELD:
-//             if node.value == "" {
-//                 if node.data_binding.data == null {
-//                     log("ERROR: no value defined for node '%v'\n", node.name) // TODO: proc to get full path to node
-//                     return false
-//                 }
-//                 node.value = fmt.tprintf("%v", node.data_binding)
-//             }
-//             append(*builder, 
-//                 to_conformant_string(node.value, allocator = context.temp_allocator),
-//             )
-//     }
-    
-//     return true
-// }
-
-
 // determination is currently made based only on node's data binding and parent's data binding, but we will probably consider some other flags on the node later
 // the type set here is authoritative, so when we go to actually serialize a node later, it must be serializable as this type
-determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
+determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
     if node.data_binding.value_pointer == null  return .OBJECT;
-
+    
     io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
     
     if node.data_binding.type.type == {
@@ -286,7 +171,7 @@ determine_node_type_for_serialization :: (node: *DOM_Node) -> Node_Type {
     return .INVALID;
 }
 
-append_nodes_for_indirect_bindings :: (node: *DOM_Node) {
+append_nodes_for_indirect_bindings :: (node: *Node) {
     if node == null || node.data_binding.value_pointer == null  return;
     
     if node.data_binding.type.type == {
@@ -331,7 +216,6 @@ do_sameline_for_type :: (ti: *Type_Info) -> bool {
         || ti.type == .ENUM;
 }
 
-
 is_escaped_char :: (char: u8) -> bool {
     return char == #char "\\" || char == #char "\"";
 }
@@ -354,3 +238,8 @@ to_conformant_string :: (str: string, force_quotes := false) -> string {
     
     return builder_to_string(*sb);
 }
+
+#scope_file
+
+INDENTATION_STRING :: "    ";
+
