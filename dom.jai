@@ -35,13 +35,19 @@ Node :: struct {
     parent, next, prev: *Node;
     
     name:       string;
+    name_type:  Token_Type;
+    
     type:       Node_Type;
     flags:      Node_Flags;
     location:   Source_Code_Location;
+    
     binding:    Any;
     
     using content: union {
-        value:      string;
+        struct {
+            value:      string;
+            value_type: Token_Type;
+        }
         children:   Node_List;
     };
 }

@@ -45,3 +45,15 @@ Temporarily remove field references to reconsider how these can be implemented b
 For user extension, will introduce something like directives which should be relatively versatile. 
     may be able to implement some level of control over allocators through directives
 
+We are very close to being able to completely remove node flags, but I didnt feel like refactoring the sameline stuff for serialization just yet
+    and I'm also somewhat hesitant about removing .ARRAY_INDEXED and .ARRAY_AS_OBJECT
+    maybe we will want to add these back in behind some interface proc so that we can change things around in future if needed
+
+Lexer improvements
+    I think it would be beneficial to lex numbers, identifiers, and strings as distinct tokens 
+    then maybe we just store the 'name' and 'value' tokens on each node, so that we preserve info about the token type into the data binding stage
+        number can bind to int/float/enum
+        string can be as name of field or value for string
+        identifier can be used as name of field or value for enum
+            identifier could gain special usage in other cases if disambiguated from string?
+    

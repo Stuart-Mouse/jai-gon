@@ -42,7 +42,7 @@ add_data_binding_to_dom :: (using parser: *Parser, binding: Any, path: string) -
 add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
     for bindings
         if !add_data_binding_to_dom(parser, it.binding, it.path)  
-            then return false;
+            return false;
     return true;
 }
 
@@ -86,7 +86,7 @@ construct_dom :: (using parser: *Parser) -> bool {
             log("%:%,%: GON parser error: Unexpected % token: '%'.", token.location.fully_pathed_filename, token.location.line_number, token.location.character_number, token.type, token.text);
         }
     }
-
+    
     push_allocator(get_pool_allocator(*parser.node_pool));
     
     next_token: Token;
@@ -98,18 +98,17 @@ construct_dom :: (using parser: *Parser) -> bool {
     
     parent := root_node;
     while L_Loop := (parent != null) {
-        name, text:         string;
-        type:               Node_Type;
-        flags:              Node_Flags;
-        location:    Source_Code_Location;
+        name, value: Token;
+        node_type:   Node_Type;
         
         // read field name
         if parent.type != .ARRAY {
             next_token = get_token(*tokenizer);
             if next_token.type == {
+              case .IDENTIFIER; #through;
+              case .NUMBER;     #through;
               case .STRING;
-                name = next_token.text;
-                location = next_token.location;
+                name = next_token;
                 
               case .EOF;
                 if parent != root_node {
@@ -140,15 +139,17 @@ construct_dom :: (using parser: *Parser) -> bool {
     
         // read field value
         if next_token.type == {
+          case .IDENTIFIER; #through;
+          case .NUMBER;     #through;
           case .STRING;
-            type = .FIELD;
-            text = next_token.text;
+            node_type = .FIELD;
+            value = next_token;
             
           case .OBJECT_BEGIN;
-            type = .OBJECT;
+            node_type = .OBJECT;
             
           case .ARRAY_BEGIN;
-            type = .ARRAY;
+            node_type = .ARRAY;
             
           case .ARRAY_END;
             if parent.type != .ARRAY {
@@ -163,13 +164,14 @@ construct_dom :: (using parser: *Parser) -> bool {
             return false;
         }
         
-        assert(type != .UNINITIALIZED);
+        assert(node_type != .UNINITIALIZED);
         
         node := append_child_node(parent);
-        node.name  = name;
-        node.type  = type;
-        node.flags = flags;
-        node.location = ifx location.line_number then location else next_token.location;
+        node.name      = name.text;
+        node.name_type = name.type;
+        
+        node.type = node_type;
+        node.location = ifx name.location.line_number then name.location else value.location;
         
         if node.type == {
           case .OBJECT; #through;
@@ -177,7 +179,8 @@ construct_dom :: (using parser: *Parser) -> bool {
             parent = node;
             
           case .FIELD;
-            node.value = text;
+            node.value      = value.text;
+            node.value_type = value.type;
         }
     }
     
@@ -203,7 +206,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     if io_data {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
-        if !is_indexed_array(node.parent) && io_data.name_member {
+        if io_data.name_member {
             name_member = io_data.name_member;
             name_member_any = Any.{ name_member.type, node.binding.value_pointer + name_member.offset_in_bytes };
         }
@@ -212,6 +215,10 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             node.binding = io_data.bind_proc(node.binding);
             io_data = get_io_data(node.binding.type);
         }
+    }
+    
+    if is_indexed_array(node.parent) {
+        name_member = null; // don't assign name member if in an indexed array
     }
     
     defer if name_member {
@@ -248,35 +255,40 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             element_has_name  := element_io_data != null && element_io_data.name_member != null;
             
             if element_is_struct && !element_has_name {
-                log("Data binding error: GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");
+                log("%:%,%: GON data binding error: GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
             }
             
             if !is_indexed && !element_is_struct {
-                log("Data binding error: GON object with binding to array must either be indexed or contain a struct type with a defined IO_Data name member.");
+                log("%:%,%: GON data binding error: GON object with binding to array must either be indexed or contain a struct type with a defined IO_Data name member.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
+            }
+            
+            get_element_index :: (node: *Node, array_io_data: *IO_Data) -> int, bool {
+                if array_io_data.enum_index_type {
+                    index, ok := enum_name_to_value(xx array_io_data.enum_index_type, node.name);
+                    if !ok {
+                        log("%:%,%: GON data binding error: Unable to parse enum value from string: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.name);
+                        return 0, false;
+                    }
+                    return index, true;
+                } else {
+                    index, ok, remainder := to_integer(node.name);
+                    if !ok || remainder {
+                        log("%:%,%: GON data binding error: Unable to parse integer from string: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.name);
+                        return 0, false;
+                    }
+                    return index, true;
+                }
             }
             
             if ti_array.array_type == .RESIZABLE {
                 raw_array := node.binding.value_pointer.(*Resizable_Array);
-                
                 if is_indexed {
                     for node.children {
-                        elem_index: int;
-                        ok: bool;
-                        if io_data.enum_index_type {
-                            elem_index, ok = enum_name_to_value(xx io_data.enum_index_type, it.name);
-                            if !ok {
-                                log("Data Binding Error: Unable to parse enum value from string: %", it.name);
-                                return false;
-                            }
-                        } else {
-                            elem_index, ok = to_integer(it.name);
-                            if !ok {
-                                log("Data Binding Error: Unable to parse integer from string: %", it.name);
-                                return false;
-                            }
-                        }
+                        elem_index, ok := get_element_index(it, io_data);
+                        if !ok  return false;
+                        
                         elem_any := array_add_any_at_index(node.binding, elem_index);
                         if !add_data_binding_to_node(it, elem_any)  return false;
                     }
@@ -293,10 +305,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 array_count, array_data := get_array_count_and_data(node.binding.value_pointer, ti_array);
                 
                 if is_indexed {
+                    // NOTE: we don't dynamically allocate for views with indexed elements, since it's not clear exactly how that should work.
                     for node.children {
-                        elem_index := to_integer(it.name);
+                        elem_index, ok := get_element_index(it, io_data);
+                        if !ok  return false;
+                        
                         if elem_index < 0 || elem_index >= array_count {
-                            log("Data Binding Error: array index is out of bounds.");
+                            log("%:%,%: GON data binding error: array index is out of bounds.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                             return false;
                         }
                         
@@ -304,6 +319,11 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                         if !add_data_binding_to_node(it, element_any)  return false;
                     }
                 } else {
+                    // TODO: should we really be using realloc here? 
+                    // Seems like it could be risky if original memory was allocated with a different allocator.
+                    // Perhaps if the view already has some memory allocated, we should just leave it or fail?
+                    // Or maybe we just add some user configuration to specify how to handle this situation...
+                    // This consideration is probably why I didn't have such allocation implemented in the first place.
                     if ti_array.array_type == .VIEW {
                         raw_array   := node.binding.value_pointer.(*Array_View_64);
                         array_count  = node.children.count;
@@ -313,7 +333,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                     
                     if node.children.count > array_count {
-                        log("%:%,%: Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.children.count, array_count);
+                        log("%:%,%: GON data binding error: GON array contains % elements, but data binding only contains space for %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.children.count, array_count);
                         return false;
                     }
                     
@@ -325,7 +345,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
           case;
-            log("%:%,%: Data Binding Error: GON object cannot be bound to type %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
+            log("%:%,%: GON data binding error: GON object cannot be bound to type %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
             return false;
         }
         
@@ -335,7 +355,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
           case .ENUM;
             ti_enum := node.binding.type.(*Type_Info_Enum);
             if !(ti_enum.enum_type_flags & .FLAGS) {
-                log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
+                log("%:%,%: GON data binding error: cannot bind an enum to an array unless it is an enum_flags.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
             }
             if node.parent.binding.value_pointer == node.binding.value_pointer {
@@ -349,7 +369,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             ti_struct := node.binding.type.(*Type_Info_Struct);
 
             if node.children.count > ti_struct.members.count {
-                log("Data binding error: array-type struct contains too many elements.");
+                log("%:%,%: GON data binding error: GON array contains more elements than can be mapped to the struct members of type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(ti_struct));
                 return false;
             }
             for node.children {
@@ -383,6 +403,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             } else {
                 array_count, array_data := get_array_count_and_data(node.binding.value_pointer, ti_array);
                 
+                // TODO: same issues here with realloc as are noted above in OBJECT case
                 if ti_array.array_type == .VIEW {
                     raw_array   := node.binding.value_pointer.(*Array_View_64);
                     array_count  = node.children.count;
@@ -392,7 +413,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 }
                 
                 if node.children.count > array_count {
-                    log("Data binding error: bounds check failed on array or slice.");
+                    log("%:%,%: GON data binding error: bounds check failed on array or slice.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                     return false;
                 }
                 
@@ -403,11 +424,11 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
           case;
-            log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.binding.type).(*Type).*, node.*);
+            log("%:%,%: GON data binding error: GON array cannot be bound to type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
             return false;
         }
         
-
+        
       case .FIELD;
         if node.binding.type.type == {
           case .INTEGER;    // no op
@@ -418,18 +439,25 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             // For enum flags, both the enclosing array and the individual elements have the same binding
             // For fields, we must verify that the parent binding is the same as the field binding
             ti_enum := node.binding.type.(*Type_Info_Enum);
-            if (ti_enum.enum_type_flags & .FLAGS) && node.parent.binding.value_pointer != node.binding.value_pointer
+            if (ti_enum.enum_type_flags & .FLAGS) && node.parent.binding.value_pointer != node.binding.value_pointer {
+                log("%:%,%: GON data binding error: GON field cannot be bound directly to an enum_flags, use a GON array instead.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
-        
-          case .ARRAY; 
-            // Arrays of bytes/u8 are permitted as single-valued fields so that we can parse them as strings
-            if node.binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
+            }
+            
+          case .ARRAY;
+            if node.binding.type.(*Type_Info_Array).element_type == type_info(u8) {
+                log("%:%,%: GON data binding error: Unable to bind GON field to array type. (A special exception is made for arrays of u8, so that they can be treated like strings.)", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
-        
-        // TODO: permit structs which have custom parsing procedures defined
-        
+            }
+            
+          case .STRUCT;
+            if !io_data || !io_data.parse_proc {
+                log("%:%,%: GON data binding error: Unable to bind GON field to struct type unless an IO_Data parse_proc is defined.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                return false;
+            }
+            
           case;
-            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.binding.type).(*Type).*, node.*);
+            log("%:%,%: GON data binding error: Unable to bind GON field to type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
             return false;
         }
         
@@ -441,15 +469,17 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
 }
 
 
+// TODO: probbaly clean this up further and move into utils or remap.jai
 // modified version of set_value_from_string in Reflection.jai
 set_value_from_string :: (any: Any, text: string) -> bool {
     if text.count <= 0  return true; // empty string -> return true
     
     if any.type.type == {
         case .INTEGER;
-            result, success := string_to_int(text);
-            if !success return false;
+            result, ok, remainder := string_to_int(text);
+            if !ok || remainder return false;
             
+            // TODO: should add a more dynamic version of range_check_and_store in remap.jai and use that here, also reporting the out-of-range error 
             ti_integer := any.type.(*Type_Info_Integer);
             if ti_integer.signed {
                 valid, low, high := range_check_and_store(result, ti_integer, any.value_pointer);
@@ -458,33 +488,35 @@ set_value_from_string :: (any: Any, text: string) -> bool {
             } else {
                 valid, low, high := range_check_and_store(result.(u64), ti_integer, any.value_pointer);
                 // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
+                // report_parse_error(lexer, token, "The value '%' is out of range. (It must be between % and %.)", int_value, low, high);
                 if !valid return false;
-            }  
-            return true;  
-  
-        case .FLOAT;
-            if any.type.runtime_size == {
-              case 4;
-                val, ok, text := string_to_float(text);
-                if !ok return false;
-                any.value_pointer.(*float).* = val;
-              case 8;
-                val, ok, text := string_to_float64(text);
-                if !ok return false;
-                any.value_pointer.(*float64).* = val;
             }
             return true;
             
+            
+        case .FLOAT;
+            value, ok, remainder := string_to_float64(text);
+            if !ok || remainder  return false;
+            
+            if any.type.runtime_size == {
+              case 4; any.value_pointer.(*float32).* = value.(float32);
+              case 8; any.value_pointer.(*float64).* = value;
+            }
+            return true;
+            
+            
         case .BOOL;
+            // OK, maybe we should be a bit more rigorous here...
             b := (to_upper(text[0]) == #char "T");
             any.value_pointer.(*bool).* = b; 
             return true;
             
+            
         case .STRING;
             // TODO: add conditional logic to NOT copy string if desired
-            // any.value_pointer.(*string).* = text;
             any.value_pointer.(*string).* = copy_string(text);
             return true;
+  
   
         case .ENUM;
             enum_type := any.type.(*Type_Info_Enum);  

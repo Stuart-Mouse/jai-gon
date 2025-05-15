@@ -13,16 +13,14 @@ Token_Type :: enum u8 {
     EOF;
     ERROR;
     
+    IDENTIFIER;
     STRING;
+    NUMBER;
     
     OBJECT_BEGIN;
     OBJECT_END;
     ARRAY_BEGIN;
     ARRAY_END;
-    
-    // REF_INDEX;
-    // REF_POINTER;
-    // REF_VALUE;
 }
 
 Lexer :: struct {
@@ -71,57 +69,107 @@ is_numeric :: inline (char: u8) -> bool {
     return char >= #char "0" && char <= #char "9";
 }
 
+make_error_token :: (message: string = "", location: Source_Code_Location) -> Token { 
+    return .{ .ERROR, message, location }; 
+}
+
 // mutates the passed string, advancing it to the position after the returned token
-lex_next_token :: (using t: *Lexer) -> Token {
-    if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
-    
+lex_next_token :: (using lexer: *Lexer) -> Token {
+    if !skip_whitespace_and_comments(lexer)  return .{ type = .EOF };
     location := cursor_location;
-    make_error_token :: (error_string: string = "") -> Token #expand { 
-        return .{ type = .ERROR, location = location, text = error_string }; 
-    }
     
     // single character tokens
     if file[0] == {
-      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "{", location };
-      case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", location };
-      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", location };
-      case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", location };
-      // case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", location };
-      // case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", location };
-      // case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", location };
+      case #char "{";  advance(lexer);  return .{ .OBJECT_BEGIN, "{", location };
+      case #char "}";  advance(lexer);  return .{ .OBJECT_END,   "}", location };
+      case #char "[";  advance(lexer);  return .{ .ARRAY_BEGIN,  "[", location };
+      case #char "]";  advance(lexer);  return .{ .ARRAY_END,    "]", location };
     }
     
-    // string
+    str, ok := try_lex_number(lexer);
+    if !ok  return make_error_token("Unexpected token while parsing number.", location);
+    if str  return .{ .NUMBER, str, location };
+    
+    str = try_lex_identifier(lexer);
+    if str  return .{ .IDENTIFIER, str, location };
+    
+    // parse string
     if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
         quote_char := file[0];
         
-        if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
-        string_value := string.{ 0, file.data };
+        if !advance(lexer)  return make_error_token("Unexpected EOF while parsing string", location);
+        str := string.{ 0, file.data };
         
         while file[0] != quote_char {
             // TODO: handle escape sequences more properly
             adv := 1 + (file[0] == #char "\\").(int); 
-            string_value.count += adv;
-            if !advance(t, adv)  return make_error_token("Unexpected EOF while parsing string.");
+            str.count += adv;
+            if !advance(lexer, adv)  
+                return make_error_token("Unexpected EOF while parsing string", location);
         }
-        advance(t);
+        advance(lexer);
         
-        return .{ .STRING, string_value, location };
+        return .{ .STRING, str, location };
     }
     
-    // unquoted string
-    if is_alnum(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-        string_value := string.{ 0, file.data };
+    return make_error_token("Unexpected character encountered", location);
+}
+
+try_lex_number :: (using lexer: *Lexer) -> (string, bool) {
+    if is_digit(file[0]) || (file.count > 1 && file[0] == #char "-" && is_digit(file[1])) {
+        str: string = .{ 1, file.data };
+        advance(lexer);
         
-        while is_alnum(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-            string_value.count += 1;
-            if !advance(t)  break;
+        after_dot    := false;
+        accept_alpha := false;
+        if file && is_any(file[0], "bhx") {
+            str.count += 1;
+            if !advance(lexer)  
+                return "", false;
+            after_dot = true;   // so that we don't accept a dot in a integer literal
+            accept_alpha = true;
         }
         
-        return .{ .STRING, string_value, location };
+        while file {
+            // we can only allow one decimal point in a number, and it cannot be followed consecutively by a second decimal point
+            if !(is_digit(file[0]) || (accept_alpha && is_alpha(file[0]))) {
+                if file[0] != #char "." || after_dot       break;
+                if file.count > 1 && file[1] == #char "."  break;
+                after_dot = true;
+            }
+            str.count += 1;
+            advance(lexer);
+        }
+        
+        return str, true;
     }
-    
-    return make_error_token("Unexpected character encountered.");
+    return "", true;
+}
+
+
+begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char == #char "_"; }
+continues_identifier :: is_alnum;
+
+// returns true if we even start to parse an identifier, not only on success
+try_lex_identifier :: (using lexer: *Lexer) -> string {
+    if begins_identifier(file[0]) {
+        str: string = .{ 1, *file[0] };
+        advance(lexer);
+        
+        while file && continues_identifier(file[0]) {
+            str.count += 1;
+            advance(lexer);
+        }
+        return str;
+    }
+    return "";
+}
+
+is_legal_identifier :: (str: string) -> bool {
+    if !str return false;
+    if !begins_identifier(str[0])  return false;
+    for str  if !continues_identifier(it)  return false;
+    return true;
 }
 
 
