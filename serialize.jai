@@ -106,13 +106,6 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
             node.value = tprint("%", node.data_binding); // TODO
         }
         append(*builder, to_conformant_string(node.value,, allocator = temp));
-        
-      // case .REFERENCE;
-      //   if node.ref.type == {
-      //       case .INDEX;    print_to_builder(*builder, "%", get_node_index(node.ref.node));
-      //       case .POINTER;  print_to_builder(*builder, "*\"%\"", node.ref.path);
-      //       case .VALUE;    assert(false, "Cannot print a value node."); // should not occur
-      //   }
     }
     
     return true;

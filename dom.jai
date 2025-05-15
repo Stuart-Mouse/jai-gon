@@ -1,39 +1,32 @@
 
 Node_Flags :: enum_flags {
     // parsing flags
-    REFERENCES_RESOLVED;
-    BINDING_RESOLVED;
-    BINDING_ON_PATH;
+    // REFERENCES_RESOLVED;
+    // BINDING_RESOLVED;
+    // BINDING_ON_PATH;
     
     ARRAY_AS_OBJECT;
     ARRAY_INDEXED;
     ARRAY_ENUMERATED;
     
-    PENDING_DEPENDENCY;
+    // PENDING_DEPENDENCY;
     
     // TODO: this can probably be removed
     // used to mark that we should not try to assign the name of a gon object to the name_member of a struct
-    DONT_ASSIGN_NAME;
+    // DONT_ASSIGN_NAME;
     
     // used to indicate that a field assumes the parent object's binding, used for special field value ref syntax
-    BIND_PARENT;
+    // BIND_PARENT;
     
     // formatting flags
     SAME_LINE;
 }
-
-Reference_Type :: enum { 
-    VALUE; 
-    POINTER; 
-    INDEX; 
-};
 
 Node_Type :: enum { 
     UNINITIALIZED :: 0;
     FIELD         :: 1;
     OBJECT        :: 2;
     ARRAY         :: 3;
-    REFERENCE     :: 4;
 }
 
 // this struct is kinda big
@@ -48,11 +41,6 @@ Node :: struct {
     data_binding:       Any;
     
     using content: union {
-        // reference: struct {
-        //     path:   string;
-        //     node:   *Node;
-        //     type:   Node_Ref_Type;
-        // };
         value:      string;
         children:   Node_List;
     };
@@ -268,12 +256,6 @@ clone_node_recursive :: (dst: *Node, src: *Node) -> bool {
       case .OBJECT; #through;
       case .ARRAY;
         return clone_child_nodes_recursive(dst, src);
-        
-      case .REFERENCE;
-        dst.ref = src.ref;
-        if dst.ref.type == .VALUE {
-            log_error("ERROR: cloned a value ref node @ %v", format_node_path(dst));
-        }
         
       case .FIELD;
         dst.value = src.value;
