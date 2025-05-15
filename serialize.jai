@@ -23,7 +23,7 @@ serialize_to_file :: (using parser: *Parser, file_path: string) -> bool {
     return true;
 }
 
-serializer_insert_data_binding :: (parser: *Parser, path: string, binding: Any, prepend: bool = false) {
+serializer_insert_binding :: (parser: *Parser, path: string, binding: Any, prepend: bool = false) {
     append_data_node(parser.root_node, path, binding, prepend);
 }
 
@@ -62,8 +62,8 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
     }
     
     // For debugging, seeing type of data binding
-    // if node.data_binding.value_pointer {
-    //     print_to_builder(*builder, "(%) ", (cast(*Type) *node.data_binding.type).*);
+    // if node.binding.value_pointer {
+    //     print_to_builder(*builder, "(%) ", (cast(*Type) *node.binding.type).*);
     // }
     
     if node.type == {
@@ -73,7 +73,7 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
         same_line ||= (.SAME_LINE & node.flags).(bool);
         
         is_array := (node.type == .ARRAY);
-        if is_array && node.children.first && do_sameline_for_type(node.children.first.data_binding.type) {
+        if is_array && node.children.first && do_sameline_for_type(node.children.first.binding.type) {
             node.flags |= .SAME_LINE;
             same_line = true;
         }
@@ -98,12 +98,12 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
         
       case .FIELD;
         if node.value == "" {
-            if node.data_binding.value_pointer == null {
+            if node.binding.value_pointer == null {
                 log("ERROR: no value defined for node '%v'\n", format_node_path(node));
                 return false;
             }
             
-            node.value = tprint("%", node.data_binding); // TODO
+            node.value = tprint("%", node.binding); // TODO
         }
         append(*builder, to_conformant_string(node.value,, allocator = temp));
     }
@@ -114,11 +114,11 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
 // determination is currently made based only on node's data binding and parent's data binding, but we will probably consider some other flags on the node later
 // the type set here is authoritative, so when we go to actually serialize a node later, it must be serializable as this type
 determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
-    if node.data_binding.value_pointer == null  return .OBJECT;
+    if node.binding.value_pointer == null  return .OBJECT;
     
-    io_data := table_find_pointer(*IO_Data_Lookup, node.data_binding.type);
+    io_data := table_find_pointer(*IO_Data_Lookup, node.binding.type);
     
-    if node.data_binding.type.type == {
+    if node.binding.type.type == {
       case .INTEGER; #through;
       case .FLOAT;   #through;
       case .STRING;  #through;
@@ -126,12 +126,12 @@ determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
         return .FIELD;
         
       case .ENUM;
-        ti_enum := node.data_binding.type.(*Type_Info_Enum);
+        ti_enum := node.binding.type.(*Type_Info_Enum);
         if !(ti_enum.enum_type_flags & .FLAGS) {
             return .FIELD;
         }
         // check if parent data binding is the same.
-        if node.parent && node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
+        if node.parent && node.parent.binding.value_pointer == node.binding.value_pointer {
             return .FIELD;
         }
         node.flags |= .SAME_LINE;
@@ -140,7 +140,7 @@ determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
       case .ARRAY;
         // arrays of bytes/u8 are serialized as string
         // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
-        ti_array := node.data_binding.type.(*Type_Info_Array);
+        ti_array := node.binding.type.(*Type_Info_Array);
         if ti_array.element_type.runtime_size == 1 {
             return .FIELD;
         }
@@ -165,14 +165,14 @@ determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
 }
 
 append_nodes_for_indirect_bindings :: (node: *Node) {
-    if node == null || node.data_binding.value_pointer == null  return;
+    if node == null || node.binding.value_pointer == null  return;
     
-    if node.data_binding.type.type == {
+    if node.binding.type.type == {
       case .STRUCT;
-        ti_struct := node.data_binding.type.(*Type_Info_Struct);
+        ti_struct := node.binding.type.(*Type_Info_Struct);
         for ti_struct.members {
             member_any := Any.{
-                value_pointer = node.data_binding.value_pointer + it.offset_in_bytes,
+                value_pointer = node.binding.value_pointer + it.offset_in_bytes,
                 type          = it.type,
             };
             // figure out whether to prepend elems (will do for things that need to be attrs)
@@ -181,10 +181,10 @@ append_nodes_for_indirect_bindings :: (node: *Node) {
         return;
         
       case .ARRAY;
-        ti_array := node.data_binding.type.(*Type_Info_Array);
+        ti_array := node.binding.type.(*Type_Info_Array);
     
         // TODO: use get_array_count_and_data?
-        count, data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+        count, data := get_array_count_and_data(node.binding.value_pointer, ti_array);
         if count == 0 || data == null  return;
         
         for 0..elem_count-1 {

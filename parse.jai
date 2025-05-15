@@ -61,24 +61,32 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
         return true;
         
       case .FIELD;
-        if node.data_binding.value_pointer == null  return true;
+        if node.binding.value_pointer == null  return true;
         
-        io_data := get_io_data(node.data_binding.type);
+        io_data := get_io_data(node.binding.type);
         if io_data && io_data.parse_proc {
-            if io_data.parse_proc(node.data_binding, node.value) {
-                log("%:%,%: GON Data Binding Error: parse_proc failed.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number);
+            if io_data.parse_proc(node.binding, node.value) {
+                log("%:%,%: GON Data Binding Error: parse_proc failed.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
             }
             return true;
         }
         
-        return set_value_from_string(node.data_binding, node.value);
+        return set_value_from_string(node.binding, node.value);
     }
     
     return true;
 }
 
 construct_dom :: (using parser: *Parser) -> bool {
+    log_unexepected_token :: (token: Token) {
+        if token.type == .ERROR {
+            log("%:%,%: GON lexer error: %.", token.location.fully_pathed_filename, token.location.line_number, token.location.character_number, token.text);
+        } else {
+            log("%:%,%: GON parser error: Unexpected % token: '%'.", token.location.fully_pathed_filename, token.location.line_number, token.location.character_number, token.type, token.text);
+        }
+    }
+
     push_allocator(get_pool_allocator(*parser.node_pool));
     
     next_token: Token;
@@ -93,44 +101,40 @@ construct_dom :: (using parser: *Parser) -> bool {
         name, text:         string;
         type:               Node_Type;
         flags:              Node_Flags;
-        source_location:    Source_Code_Location;
+        location:    Source_Code_Location;
         
         // read field name
         if parent.type != .ARRAY {
             next_token = get_token(*tokenizer);
-            if next_token.type == .ERROR {
-                log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
-                return false;
-            }
             if next_token.type == {
               case .STRING;
                 name = next_token.text;
-                source_location = next_token.location;
+                location = next_token.location;
                 
               case .EOF;
                 if parent != root_node {
-                    log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                    log_unexepected_token(next_token);
                     return false;
                 }
                 break L_Loop;
                 
               case .OBJECT_END;
                 if parent.type != .OBJECT {
-                    log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                    log_unexepected_token(next_token);
                     return false;
                 }
                 parent = parent.parent;
                 continue;
                 
               case;
-                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                log_unexepected_token(next_token);
                 return false;
             }
         }
         
         next_token = get_token(*tokenizer);
         if next_token.type == .ERROR {
-            log("GON tokenization error: Unexpected % token \"%\".", next_token.type, next_token.text);
+            log_unexepected_token(next_token);
             return false;
         }
     
@@ -148,14 +152,14 @@ construct_dom :: (using parser: *Parser) -> bool {
             
           case .ARRAY_END;
             if parent.type != .ARRAY {
-                log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+                log_unexepected_token(next_token);
                 return false;
             }
             parent = parent.parent;
             continue;
             
           case;
-            log("GON parse error: Unexpected % token \"%\".", next_token.type, next_token.text);
+            log_unexepected_token(next_token);
             return false;
         }
         
@@ -165,7 +169,7 @@ construct_dom :: (using parser: *Parser) -> bool {
         node.name  = name;
         node.type  = type;
         node.flags = flags;
-        node.source_location = ifx source_location.line_number then source_location else next_token.location;
+        node.location = ifx location.line_number then location else next_token.location;
         
         if node.type == {
           case .OBJECT; #through;
@@ -185,28 +189,28 @@ construct_dom :: (using parser: *Parser) -> bool {
 add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     if node == null || binding.value_pointer == null  return true;
     
-    if node.data_binding.value_pointer != null {
+    if node.binding.value_pointer != null {
         log("Error, node already has a data binding set...");
         return false;
     }
     
-    node.data_binding = binding;
+    node.binding = binding;
     
     name_member:      *Type_Info_Struct_Member;
     name_member_any:  Any;
     
-    io_data := get_io_data(node.data_binding.type);
+    io_data := get_io_data(node.binding.type);
     if io_data {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
         if !is_indexed_array(node.parent) && io_data.name_member {
             name_member = io_data.name_member;
-            name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
+            name_member_any = Any.{ name_member.type, node.binding.value_pointer + name_member.offset_in_bytes };
         }
         
         if io_data.bind_proc {
-            node.data_binding = io_data.bind_proc(node.data_binding);
-            io_data = get_io_data(node.data_binding.type);
+            node.binding = io_data.bind_proc(node.binding);
+            io_data = get_io_data(node.binding.type);
         }
     }
     
@@ -215,7 +219,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     }
     
     // TODO: think about whether we want to reimplement this functionality
-    // node.data_binding = deref_any_pointer(node.data_binding);
+    // node.binding = deref_any_pointer(node.binding);
     
     // make indirect bindings onto child nodes
     if node.type == {
@@ -223,19 +227,19 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
         if binding.type.type == {
           case .STRUCT;            
             for node.children {
-                member := get_field(xx node.data_binding.type, it.name);
+                member := get_field(xx node.binding.type, it.name);
                 if !member || (member.flags & .CONSTANT)  continue;
                 
                 // we don't want to set it if the name member has a binding to a child node
                 if member == name_member then name_member = null;
                 
-                member_any := Any.{ member.type, node.data_binding.value_pointer + member.offset_in_bytes };
+                member_any := Any.{ member.type, node.binding.value_pointer + member.offset_in_bytes };
                 if !add_data_binding_to_node(it, member_any)  return false;
             }
             
             
           case .ARRAY;
-            ti_array := node.data_binding.type.(*Type_Info_Array);
+            ti_array := node.binding.type.(*Type_Info_Array);
             
             is_indexed := io_data != null && (.ARRAY_INDEXED & io_data.flags) != 0;
             
@@ -254,7 +258,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
             if ti_array.array_type == .RESIZABLE {
-                raw_array := node.data_binding.value_pointer.(*Resizable_Array);
+                raw_array := node.binding.value_pointer.(*Resizable_Array);
                 
                 if is_indexed {
                     for node.children {
@@ -273,7 +277,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                                 return false;
                             }
                         }
-                        elem_any := array_add_any_at_index(node.data_binding, elem_index);
+                        elem_any := array_add_any_at_index(node.binding, elem_index);
                         if !add_data_binding_to_node(it, elem_any)  return false;
                     }
                 } else {
@@ -286,7 +290,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                 }
             } else { // .FIXED and .VIEW
-                array_count, array_data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+                array_count, array_data := get_array_count_and_data(node.binding.value_pointer, ti_array);
                 
                 if is_indexed {
                     for node.children {
@@ -301,7 +305,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                 } else {
                     if ti_array.array_type == .VIEW {
-                        raw_array   := node.data_binding.value_pointer.(*Array_View_64);
+                        raw_array   := node.binding.value_pointer.(*Array_View_64);
                         array_count  = node.children.count;
                         new_size    := array_count * ti_array.element_type.runtime_size;
                         array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
@@ -309,7 +313,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                     
                     if node.children.count > array_count {
-                        log("%:%,%: Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number, node.children.count, array_count);
+                        log("%:%,%: Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.children.count, array_count);
                         return false;
                     }
                     
@@ -321,7 +325,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
           case;
-            log("%:%,%: Data Binding Error: GON object cannot be bound to type %.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number, as_type(node.data_binding.type));
+            log("%:%,%: Data Binding Error: GON object cannot be bound to type %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
             return false;
         }
         
@@ -329,20 +333,20 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
       case .ARRAY;
         if binding.type.type == {
           case .ENUM;
-            ti_enum := node.data_binding.type.(*Type_Info_Enum);
+            ti_enum := node.binding.type.(*Type_Info_Enum);
             if !(ti_enum.enum_type_flags & .FLAGS) {
                 log("Data binding error: tried to bind an enum to an array on field %", format_node_path(node));
                 return false;
             }
-            if node.parent.data_binding.value_pointer == node.data_binding.value_pointer {
+            if node.parent.binding.value_pointer == node.binding.value_pointer {
                 return false;
             }
             for node.children {
-                if !add_data_binding_to_node(it, node.data_binding)  return false;
+                if !add_data_binding_to_node(it, node.binding)  return false;
             }
             
           case .STRUCT;
-            ti_struct := node.data_binding.type.(*Type_Info_Struct);
+            ti_struct := node.binding.type.(*Type_Info_Struct);
 
             if node.children.count > ti_struct.members.count {
                 log("Data binding error: array-type struct contains too many elements.");
@@ -351,15 +355,15 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             for node.children {
                 // TODO: will need to to more work here because of constant struct members
                 member := ti_struct.members[it_index];
-                member_any := Any.{ member.type, node.data_binding.value_pointer + member.offset_in_bytes };
+                member_any := Any.{ member.type, node.binding.value_pointer + member.offset_in_bytes };
                 if !add_data_binding_to_node(it, member_any)  return false;
             }
             
           case .ARRAY;
-            ti_array := node.data_binding.type.(*Type_Info_Array);
+            ti_array := node.binding.type.(*Type_Info_Array);
             
             if ti_array.array_type == .RESIZABLE {
-                raw_array := node.data_binding.value_pointer.(*Resizable_Array);
+                raw_array := node.binding.value_pointer.(*Resizable_Array);
                 /*
                     IMPORTANT NOTE: 
                     It is critical that the proper amount of space is pre-allocated for the dynamic array 
@@ -377,10 +381,10 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     if !add_data_binding_to_node(it, elem_any)  return false;
                 }
             } else {
-                array_count, array_data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+                array_count, array_data := get_array_count_and_data(node.binding.value_pointer, ti_array);
                 
                 if ti_array.array_type == .VIEW {
-                    raw_array   := node.data_binding.value_pointer.(*Array_View_64);
+                    raw_array   := node.binding.value_pointer.(*Array_View_64);
                     array_count  = node.children.count;
                     new_size    := array_count * ti_array.element_type.runtime_size;
                     array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
@@ -399,13 +403,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
           case;
-            log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
+            log("Data binding error: mismatched gon(ARRAY)/internal(%) type on node %.", (*node.binding.type).(*Type).*, node.*);
             return false;
         }
         
 
       case .FIELD;
-        if node.data_binding.type.type == {
+        if node.binding.type.type == {
           case .INTEGER;    // no op
           case .BOOL;       // no op
           case .FLOAT;      // no op
@@ -413,19 +417,19 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
           case .ENUM;
             // For enum flags, both the enclosing array and the individual elements have the same binding
             // For fields, we must verify that the parent binding is the same as the field binding
-            ti_enum := node.data_binding.type.(*Type_Info_Enum);
-            if (ti_enum.enum_type_flags & .FLAGS) && node.parent.data_binding.value_pointer != node.data_binding.value_pointer
+            ti_enum := node.binding.type.(*Type_Info_Enum);
+            if (ti_enum.enum_type_flags & .FLAGS) && node.parent.binding.value_pointer != node.binding.value_pointer
                 return false;
         
           case .ARRAY; 
             // Arrays of bytes/u8 are permitted as single-valued fields so that we can parse them as strings
-            if node.data_binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
+            if node.binding.type.(*Type_Info_Array).element_type.runtime_size != 1  
                 return false;
         
         // TODO: permit structs which have custom parsing procedures defined
         
           case;
-            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.data_binding.type).(*Type).*, node.*);
+            log("Invalid data binding, mismatched gon(FIELD)/internal(%) type on node %.", (*node.binding.type).(*Type).*, node.*);
             return false;
         }
         

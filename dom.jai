@@ -34,11 +34,11 @@ Node_Type :: enum {
 Node :: struct {
     parent, next, prev: *Node;
     
-    name:               string;
-    type:               Node_Type;
-    flags:              Node_Flags;
-    source_location:    Source_Code_Location;
-    data_binding:       Any;
+    name:       string;
+    type:       Node_Type;
+    flags:      Node_Flags;
+    location:   Source_Code_Location;
+    binding:    Any;
     
     using content: union {
         value:      string;
@@ -136,11 +136,11 @@ find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
     return null, -1;
 }
 
-append_data_node :: (parent: *Node, path: string, data_binding: Any, prepend: bool = false) ->  *Node {    
+append_data_node :: (parent: *Node, path: string, binding: Any, prepend: bool = false) ->  *Node {    
     node := append_node_with_path(parent, path, prepend = prepend);
     if node == null  return node;
     
-    node.data_binding = data_binding;
+    node.binding = binding;
     node.type = determine_node_type_for_serialization(node); // TODO: combine into one  with the below indirect data bindings one below. maybe we just inline those here for now
     
     // make indirect bindings
@@ -249,7 +249,7 @@ clone_node_recursive :: (dst: *Node, src: *Node) -> bool {
     dst.name         = src.name;
     dst.type         = src.type;
     dst.flags        = src.flags;
-    dst.data_binding = src.data_binding;
+    dst.binding = src.binding;
     dst.content      = .{};
     
     if src.type == {
@@ -287,22 +287,22 @@ append_node_path_to_string_builder :: (builder: *String_Builder, node: *Node) {
 is_indexed_array :: (node: *Node) -> bool {
     if node == null
     || node.type != .OBJECT 
-    || node.data_binding.type == null 
-    || node.data_binding.type.type != .ARRAY  
+    || node.binding.type == null 
+    || node.binding.type.type != .ARRAY  
         return false;
     
-    io_data := get_io_data(node.data_binding.type);
+    io_data := get_io_data(node.binding.type);
     return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
 }
 
 is_object_array :: (node: *Node) -> bool {
     if node == null
     || node.type != .OBJECT 
-    || node.data_binding.type == null 
-    || node.data_binding.type.type != .ARRAY  
+    || node.binding.type == null 
+    || node.binding.type.type != .ARRAY  
         return false;
     
-    element_io_data := get_io_data(node.data_binding.type.(*Type_Info_Array).element_type);
+    element_io_data := get_io_data(node.binding.type.(*Type_Info_Array).element_type);
     return element_io_data != null && element_io_data.name_member != null;
 }
 
