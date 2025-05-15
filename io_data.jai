@@ -57,20 +57,39 @@ IO_Data :: struct {
     // for structs only
     name_member:        *Type_Info_Struct_Member;
     map_key_member:     *Type_Info_Struct_Member;
-    // member_data:        Table(*Type_Info_Struct_Member, IO_Data);
+    member_data:        [] struct { member: *Type_Info_Struct_Member; io_data: IO_Data; };
     
     // for arrays only
     // can be used to index any array using an enum name
     enum_index_type:    *Type_Info_Enum;
 }
 
-IO_Data_Lookup: Table(*Type_Info, IO_Data);
+IO_Data_Lookup: [..] struct { type: *Type_Info; io_data: IO_Data; };
 
-// very minor convenience
 add_io_data :: inline (type: Type, io_data: IO_Data) {
-    table_add(*IO_Data_Lookup, type.(*Type_Info), io_data);
+    add_io_data(type.(*Type_Info), io_data);
+}
+
+add_io_data :: (type: *Type_Info, io_data: IO_Data) {
+    for *IO_Data_Lookup
+        if it.type == type {
+            it.io_data = io_data;
+            return;
+        }
+    
+    array_add(*IO_Data_Lookup, .{ type, io_data });
 }
 
 get_io_data :: inline (type: *Type_Info) -> *IO_Data {
-    return table_find_pointer(*IO_Data_Lookup, type);
+    for *IO_Data_Lookup
+        if it.type == type
+            return *it.io_data;
+    return null;
+}
+
+get_struct_member_io_data :: (io_data: *IO_Data, member: *Type_Info_Struct_Member) -> *IO_Data {
+    for *io_data.member_data  
+        if it.member == member  
+            return *it.io_data;
+    return null;
 }

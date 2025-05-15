@@ -1,16 +1,11 @@
 
 ## TODO
 
-try to remove some of the extraneous flags on nodes
+finish cleanup
+    remove extraneous flags on nodes
+re-test and create a somewhat comprehensive test suite 
+hash map support
 
-implement flag for not setting name member
-
-maybe implement built-in hash map support because why not?
-
-expression evaluator using lead sheets, with special syntax for field refs
-    cannot pre type check, just due to nature of the beast
-
-refactor DOM to use flat pool allocator for nodes
 
 ## Better User Extension & Setting Allocators
 
@@ -38,28 +33,15 @@ maybe this would not be all that bad to have as a feature even if it only helped
 since then we could do something like just setting an object to allocate all elements of a specifc type in a pool allocator
 but simply having a set_allocator_for_type proc would probabyl be more useful, or something like io_data structures
 
-## Field References
-
-`&` gets then index of a node within it's parent object or array
-`*` gets a pointer to a node's data binding
-`$` gets the value of a node (by simply pointing the node at the same underlying string value) 
-
-value refs are resolved differently than index or pointer refs
-    as we are validating node references, we actually get rid of all value refs by simply cloning the nodes they refer to, recursively
-    so a value ref actually involves copying a section of the dom and pasting it where requested
-
-Currently, we have no mechanism for serializing field references.
-We could probably create some way to do this with distinct int and pointer types, but that still would not be very useful when inserting nodes recursively for serialization.
-
 
 
 
 ## Cleanup and Rewrite
 
-May remove field references for the time being and re-introduce at a later date
-for now, it's sort of better if everything is just POD
+Temporarily remove field references to reconsider how these can be implemented better, more simply.
+    Should have some means of serializing or inserting as nodes procedurally.
+    Maybe restrict to them working purely lexically.
 
 For user extension, will introduce something like directives which should be relatively versatile. 
-
-
+    may be able to implement some level of control over allocators through directives
 
