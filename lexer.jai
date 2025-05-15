@@ -44,7 +44,7 @@ get_token_or_return :: (using t: *Lexer, code: Code) -> Token #expand {
 
 get_token :: inline (using t: *Lexer) -> Token {
     if next_token.type == .ERROR {
-        log("%:(%,%): GON Lexer Error - %", next_token.location.fully_pathed_filename, next_token.location.line_number, next_token.location.character_number, next_token.text);
+        log("%:%,%: GON Lexer Error - %", next_token.location.fully_pathed_filename, next_token.location.line_number, next_token.location.character_number, next_token.text);
         return next_token;
     }
     

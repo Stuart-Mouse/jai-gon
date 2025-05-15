@@ -10,6 +10,8 @@ Parser :: struct {
     // serialization stuff
     builder:    String_Builder;
     indent:     int;
+    
+    get_allocator_for_node: #type (*Node) -> Allocator;
 };
 
 init_parser :: (parser: *Parser, file: string) {
@@ -50,8 +52,6 @@ process_data_bindings :: (using parser: *Parser) -> bool {
 }
 
 process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
-    // TODO: reimplement callbacks here
-    
     if node.type == {
       case .OBJECT; #through;
       case .ARRAY;
@@ -61,8 +61,18 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
         return true;
         
       case .FIELD;
-        return node.data_binding.value_pointer == null 
-            || set_value_from_string(node.data_binding, node.value);
+        if node.data_binding.value_pointer == null  return true;
+        
+        io_data := get_io_data(node.data_binding.type);
+        if io_data && io_data.parse_proc {
+            if io_data.parse_proc(node.data_binding, node.value) {
+                log("%:%,%: GON Data Binding Error: parse_proc failed.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number);
+                return false;
+            }
+            return true;
+        }
+        
+        return set_value_from_string(node.data_binding, node.value);
     }
     
     return true;
@@ -170,6 +180,8 @@ construct_dom :: (using parser: *Parser) -> bool {
     return true;
 }
 
+
+
 add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     if node == null || binding.value_pointer == null  return true;
     
@@ -179,25 +191,21 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     }
     
     node.data_binding = binding;
-    name_member: *Type_Info_Struct_Member;
-    name_member_any: Any;
+    
+    name_member:      *Type_Info_Struct_Member;
+    name_member_any:  Any;
     
     io_data := get_io_data(node.data_binding.type);
     if io_data {
         // because we may rebind the node, we need to assign the name_member_any
         // if this Any is still set after making bindings to child nodes, then we will assign to it
-        if io_data.name_member {
+        if !is_indexed_array(node.parent) && io_data.name_member {
             name_member = io_data.name_member;
             name_member_any = Any.{ name_member.type, node.data_binding.value_pointer + name_member.offset_in_bytes };
         }
         
-        if io_data.parse.bind_proc {
-            node.data_binding = io_data.parse.bind_proc(node.data_binding);
-            if node.data_binding.value_pointer == null {
-                log("Error, bind_proc() returned null.");
-                return false;
-            }
-            // get new io data for new binding
+        if io_data.bind_proc {
+            node.data_binding = io_data.bind_proc(node.data_binding);
             io_data = get_io_data(node.data_binding.type);
         }
     }
@@ -225,37 +233,30 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 if !add_data_binding_to_node(it, member_any)  return false;
             }
             
-            // we don't want to set the name member if the parent exists and is an indexed array, because then the gon name is being used for the index
-            if node.parent && (node.parent.flags & .ARRAY_INDEXED) then name_member = null;
-            
             
           case .ARRAY;
             ti_array := node.data_binding.type.(*Type_Info_Array);
             
-            if io_data && (.ARRAY_INDEXED & io_data.parse.flags) {
-                node.flags |= .ARRAY_INDEXED;
-            }
+            is_indexed := io_data != null && (.ARRAY_INDEXED & io_data.flags) != 0;
             
             element_io_data   := get_io_data(ti_array.element_type);
             element_is_struct := ti_array.element_type.type == .STRUCT;
+            element_has_name  := element_io_data != null && element_io_data.name_member != null;
             
-            if element_is_struct {
-                node.flags |= .ARRAY_AS_OBJECT;
-                if !element_io_data.name_member {
-                    log("Data binding error: object-type array must contain a struct with a defined name member.");
-                    return false;
-                }
+            if element_is_struct && !element_has_name {
+                log("Data binding error: GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");
+                return false;
             }
             
-            if !(node.flags & (.ARRAY_AS_OBJECT | .ARRAY_INDEXED)) {
-                log("Data binding error: object-type array must contain a struct with a defined name member.");
+            if !is_indexed && !element_is_struct {
+                log("Data binding error: GON object with binding to array must either be indexed or contain a struct type with a defined IO_Data name member.");
                 return false;
             }
             
             if ti_array.array_type == .RESIZABLE {
                 raw_array := node.data_binding.value_pointer.(*Resizable_Array);
-
-                if .ARRAY_INDEXED & node.flags {
+                
+                if is_indexed {
                     for node.children {
                         elem_index: int;
                         ok: bool;
@@ -287,7 +288,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             } else { // .FIXED and .VIEW
                 array_count, array_data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
                 
-                if .ARRAY_INDEXED & node.flags {
+                if is_indexed {
                     for node.children {
                         elem_index := to_integer(it.name);
                         if elem_index < 0 || elem_index >= array_count {
@@ -305,11 +306,10 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                         new_size    := array_count * ti_array.element_type.runtime_size;
                         array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
                         raw_array.*  = .{ array_count, array_data };
-                        log("raw array: %", raw_array.*);
                     }
                     
                     if node.children.count > array_count {
-                        log("Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.children.count, array_count);
+                        log("%:%,%: Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number, node.children.count, array_count);
                         return false;
                     }
                     
@@ -321,7 +321,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
           case;
-            log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", as_type(node.data_binding.type), node.*);
+            log("%:%,%: Data Binding Error: GON object cannot be bound to type %.", node.source_location.fully_pathed_filename, node.source_location.line_number, node.source_location.character_number, as_type(node.data_binding.type));
             return false;
         }
         
@@ -385,7 +385,6 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     new_size    := array_count * ti_array.element_type.runtime_size;
                     array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
                     raw_array.*  = .{ array_count, array_data };
-                    log("raw array: %", raw_array.*);
                 }
                 
                 if node.children.count > array_count {

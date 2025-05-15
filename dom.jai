@@ -5,9 +5,9 @@ Node_Flags :: enum_flags {
     // BINDING_RESOLVED;
     // BINDING_ON_PATH;
     
-    ARRAY_AS_OBJECT;
-    ARRAY_INDEXED;
-    ARRAY_ENUMERATED;
+    // ARRAY_AS_OBJECT;
+    // ARRAY_INDEXED;
+    // ARRAY_ENUMERATED;
     
     // PENDING_DEPENDENCY;
     
@@ -285,28 +285,25 @@ append_node_path_to_string_builder :: (builder: *String_Builder, node: *Node) {
 
 
 is_indexed_array :: (node: *Node) -> bool {
-    if node.type != .OBJECT 
-    || node.data_binding == null 
+    if node == null
+    || node.type != .OBJECT 
+    || node.data_binding.type == null 
     || node.data_binding.type.type != .ARRAY  
         return false;
     
     io_data := get_io_data(node.data_binding.type);
-    return io_data && (io_data.parse.flags & .ARRAY_INDEXED).(bool);
+    return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
 }
 
 is_object_array :: (node: *Node) -> bool {
-    if node.type != .OBJECT 
-    || node.data_binding == null 
+    if node == null
+    || node.type != .OBJECT 
+    || node.data_binding.type == null 
     || node.data_binding.type.type != .ARRAY  
         return false;
-        
-    ti_array := node.data_binding.type.(*Type_Info_Array);
     
-    element_io_data := get_io_data(ti_array.element_type);
-    if !element_io_data  return false;
-    if !element_io_data.name_member  return false;
-    
-    return true;
+    element_io_data := get_io_data(node.data_binding.type.(*Type_Info_Array).element_type);
+    return element_io_data != null && element_io_data.name_member != null;
 }
 
 
