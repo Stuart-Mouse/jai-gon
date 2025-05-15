@@ -252,7 +252,6 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 return false;
             }
             
-            
             if ti_array.array_type == .RESIZABLE {
                 raw_array := node.data_binding.value_pointer.(*Resizable_Array);
 
@@ -300,13 +299,20 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                         if !add_data_binding_to_node(it, element_any)  return false;
                     }
                 } else {
-                    // TODO: allocate for array views
+                    if ti_array.array_type == .VIEW {
+                        raw_array   := node.data_binding.value_pointer.(*Array_View_64);
+                        array_count  = node.children.count;
+                        new_size    := array_count * ti_array.element_type.runtime_size;
+                        array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
+                        raw_array.*  = .{ array_count, array_data };
+                        log("raw array: %", raw_array.*);
+                    }
                     
                     if node.children.count > array_count {
                         log("Data Binding Error: GON array contains % elements, but data binding only contains space for %.", node.children.count, array_count);
                         return false;
                     }
-                                        
+                    
                     for node.children {
                         element_any := Any.{ ti_array.element_type, array_data + (ti_array.element_type.runtime_size * it_index) };
                         if !add_data_binding_to_node(it, element_any)  return false;
@@ -314,9 +320,8 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 }
             }
             
-            
           case;
-            log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", (cast(*Type)*node.data_binding.type).*, node.*);
+            log("Invalid data binding, mismatched gon(OBJECT)/internal(%) type on node %.", as_type(node.data_binding.type), node.*);
             return false;
         }
         
@@ -373,6 +378,16 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 }
             } else {
                 array_count, array_data := get_array_count_and_data(node.data_binding.value_pointer, ti_array);
+                
+                if ti_array.array_type == .VIEW {
+                    raw_array   := node.data_binding.value_pointer.(*Array_View_64);
+                    array_count  = node.children.count;
+                    new_size    := array_count * ti_array.element_type.runtime_size;
+                    array_data   = realloc(raw_array.data, new_size, raw_array.count * ti_array.element_type.runtime_size);
+                    raw_array.*  = .{ array_count, array_data };
+                    log("raw array: %", raw_array.*);
+                }
+                
                 if node.children.count > array_count {
                     log("Data binding error: bounds check failed on array or slice.");
                     return false;
@@ -492,9 +507,11 @@ set_value_from_string :: (any: Any, text: string) -> bool {
             
             if success {
                 if (enum_type.enum_type_flags & .FLAGS) {
-                    
+                    old_value := Small_Any.from(any);
+                    value.value_number.as_u64 |= old_value.value_number.as_u64;
+                    memcpy_any(any, to_any(*value));
                 } else {
-                    
+                    memcpy_any(any, to_any(*value));
                 }
             }
             return success;

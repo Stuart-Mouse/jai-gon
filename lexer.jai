@@ -20,9 +20,9 @@ Token_Type :: enum u8 {
     ARRAY_BEGIN;
     ARRAY_END;
     
-    REF_INDEX;
-    REF_POINTER;
-    REF_VALUE;
+    // REF_INDEX;
+    // REF_POINTER;
+    // REF_VALUE;
 }
 
 Lexer :: struct {
@@ -67,6 +67,10 @@ expect_token_type :: (using t: *Lexer, type: Token_Type) -> bool {
     return false;
 }
 
+is_numeric :: inline (char: u8) -> bool {
+    return char >= #char "0" && char <= #char "9";
+}
+
 // mutates the passed string, advancing it to the position after the returned token
 lex_next_token :: (using t: *Lexer) -> Token {
     if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
@@ -82,18 +86,9 @@ lex_next_token :: (using t: *Lexer) -> Token {
       case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", location };
       case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", location };
       case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", location };
-      case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", location };
-      case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", location };
-      case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", location };
-    }
-    
-    // some helper procs
-    is_numeric :: inline (char: u8) -> bool {
-        return char >= #char "0" && char <= #char "9";
-    }
-    is_alpha :: inline (char: u8) -> bool {
-        return (char >= #char "a" && char <= #char "z") 
-            || (char >= #char "A" && char <= #char "Z");
+      // case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", location };
+      // case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", location };
+      // case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", location };
     }
     
     // string
@@ -115,10 +110,10 @@ lex_next_token :: (using t: *Lexer) -> Token {
     }
     
     // unquoted string
-    if is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
+    if is_alnum(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
         string_value := string.{ 0, file.data };
         
-        while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
+        while is_alnum(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
             string_value.count += 1;
             if !advance(t)  break;
         }
