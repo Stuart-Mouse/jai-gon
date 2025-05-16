@@ -29,25 +29,18 @@ Node_Type :: enum {
     ARRAY         :: 3;
 }
 
-// this struct is kinda big
-// maybe we optimize this later, but for now just making it work
 Node :: struct {
     parent, next, prev: *Node;
     
     name:       string;
-    name_type:  Token_Type;
-    
-    type:       Node_Type;
+    node_type:  Node_Type; // TODO: rename as node_type, and maybe 'using' binding
     flags:      Node_Flags;
     location:   Source_Code_Location;
     
     binding:    Any;
     
     using content: union {
-        struct {
-            value:      string;
-            value_type: Token_Type;
-        }
+        value:      string;
         children:   Node_List;
     };
 }
@@ -131,7 +124,7 @@ find_node_by_path :: (parser: *Parser, node: *Node, path: string) -> (*Node, int
 
 // will return null if not found
 find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
-    if parent.type != .OBJECT && parent.type != .ARRAY {
+    if parent.node_type != .OBJECT && parent.node_type != .ARRAY {
         return null, -1;
     }
     
@@ -147,10 +140,10 @@ append_data_node :: (parent: *Node, path: string, binding: Any, prepend: bool = 
     if node == null  return node;
     
     node.binding = binding;
-    node.type = determine_node_type_for_serialization(node); // TODO: combine into one  with the below indirect data bindings one below. maybe we just inline those here for now
+    node.node_type = determine_node_type_for_serialization(node); // TODO: combine into one  with the below indirect data bindings one below. maybe we just inline those here for now
     
     // make indirect bindings
-    if node.type == .OBJECT || node.type == .ARRAY {
+    if node.node_type == .OBJECT || node.node_type == .ARRAY {
         append_nodes_for_indirect_bindings(node);
     }
     
@@ -228,7 +221,7 @@ append_node_with_path :: (parent: *Node, path: string, behavior: Node_Insert_Mod
         
         node      = append_child_node(node, prepend);
         node.name = next;
-        node.type = .OBJECT;
+        node.node_type = .OBJECT;
     }
     
     assert(false, "unreachable");
@@ -292,7 +285,7 @@ append_node_path_to_string_builder :: (builder: *String_Builder, node: *Node) {
 
 is_indexed_array :: (node: *Node) -> bool {
     if node == null
-    || node.type != .OBJECT 
+    || node.node_type != .OBJECT 
     || node.binding.type == null 
     || node.binding.type.type != .ARRAY  
         return false;
@@ -303,7 +296,7 @@ is_indexed_array :: (node: *Node) -> bool {
 
 is_object_array :: (node: *Node) -> bool {
     if node == null
-    || node.type != .OBJECT 
+    || node.node_type != .OBJECT 
     || node.binding.type == null 
     || node.binding.type.type != .ARRAY  
         return false;

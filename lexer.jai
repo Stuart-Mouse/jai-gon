@@ -9,18 +9,18 @@ Token :: struct {
     location:   Source_Code_Location;
 }
 
-Token_Type :: enum u8 {
-    EOF;
-    ERROR;
+Token_Type :: enum #specified {
+    ERROR :: -1;
+    EOF   ::  0;
     
-    IDENTIFIER;
-    STRING;
-    NUMBER;
+    OBJECT_BEGIN :: #char "{";
+    OBJECT_END   :: #char "}";
+    ARRAY_BEGIN  :: #char "[";
+    ARRAY_END    :: #char "]";
     
-    OBJECT_BEGIN;
-    OBJECT_END;
-    ARRAY_BEGIN;
-    ARRAY_END;
+    IDENTIFIER :: 255 + 1;
+    STRING     :: 255 + 2;
+    NUMBER     :: 255 + 3;
 }
 
 Lexer :: struct {
@@ -29,7 +29,7 @@ Lexer :: struct {
     cursor_location:    Source_Code_Location;
 }
 
-init_tokenizer :: (using t: *Lexer, filepath := "") {
+init_lexer :: (using t: *Lexer, filepath := "") {
     cursor_location = .{ line_number = 1, character_number = 1, fully_pathed_filename = filepath };
     get_token(t);
 }

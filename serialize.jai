@@ -41,7 +41,7 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
     same_line      := false;
 
     if node.parent != null {
-        in_array       = node.parent.type == .ARRAY;
+        in_array       = node.parent.node_type == .ARRAY;
         is_first_child = node == node.parent.children.first;
         same_line      = (.SAME_LINE & node.parent.flags).(bool);      // check for sameline on parent, not self (we do that later)
     }
@@ -66,13 +66,13 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
     //     print_to_builder(*builder, "(%) ", (cast(*Type) *node.binding.type).*);
     // }
     
-    if node.type == {
+    if node.node_type == {
       case .OBJECT; #through;
       case .ARRAY;
         // ensure that end of object/array gets printed on same line if sameline flag is set on self
         same_line ||= (.SAME_LINE & node.flags).(bool);
         
-        is_array := (node.type == .ARRAY);
+        is_array := (node.node_type == .ARRAY);
         if is_array && node.children.first && do_sameline_for_type(node.children.first.binding.type) {
             node.flags |= .SAME_LINE;
             same_line = true;
@@ -97,15 +97,18 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
         append(*builder, ifx is_array then "]" else "}");
         
       case .FIELD;
-        if node.value == "" {
+        // TODO: should probably switch on node.value.type
+        string_value := node.value;
+        if string_value == "" {
             if node.binding.value_pointer == null {
                 log("ERROR: no value defined for node '%v'\n", format_node_path(node));
                 return false;
             }
             
-            node.value = tprint("%", node.binding); // TODO
+            // TODO: callback for custom serialization?
+            string_value = tprint("%", node.binding); 
         }
-        append(*builder, to_conformant_string(node.value,, allocator = temp));
+        append(*builder, to_conformant_string(string_value,, allocator = temp));
     }
     
     return true;

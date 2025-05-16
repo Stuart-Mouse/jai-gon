@@ -56,4 +56,36 @@ Lexer improvements
         string can be as name of field or value for string
         identifier can be used as name of field or value for enum
             identifier could gain special usage in other cases if disambiguated from string?
+        this is actually not working out really, no real point to keeping the token type after lexing
+        
+add better logging functions a la tbd module
+
+maybe rewrite a sax version of the parser...
+    will be less code than the dom, can probably reduce disparity between the two in terms of funcitonality more than I could have before
+    especially since we now have a real lexer, it should basically just be a single function
+
+    SAX annoyances
+        processing field paths is dumb, even with the changes I made this time
+            still need to check depth of match against current recursion depth, manually disable field paths that were not found
+        
+        parent bindings will require entirely differnet logic than the way indirect data bindings are done on DOM
+            child must check parent binding and figure out its own binding accordingly, 
+            rather than having it's binding assigned to it by parent
+        
+        
+
+## Directives
+
+`#identifier(...)`
+
+Capture everything inside the parenthesis, considers matching inner pairs of parens ?
+    give the user the idrective parameters as one big string, or as an array of tokens?
+    doing tokens is probably the best option since once can always just pass a string to the directive
+
+What can directives do?
+    produce a typed value? 
+    modify previous/parent field?
+    modify parser state?
+    
+    
     

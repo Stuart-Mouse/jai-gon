@@ -1,7 +1,4 @@
 
-Parser_Callback :: #type (*Node) -> bool;
-
-// used to build a DOM from a text file and evaluate data bindings on that DOM
 Parser :: struct {
     tokenizer:  Lexer;
     node_pool:  Flat_Pool;
@@ -14,19 +11,18 @@ Parser :: struct {
     get_allocator_for_node: #type (*Node) -> Allocator;
 };
 
-init_parser :: (parser: *Parser, file: string) {
+init_parser :: (parser: *Parser, file: string, filepath := "") {
     reset(*parser.node_pool, overwrite_memory = true);
     parser.tokenizer.file = file;
-    init_tokenizer(*parser.tokenizer);
+    init_lexer(*parser.tokenizer, filepath);
 }
 
 deinit_parser :: (using parser: *Parser) {
     fini(*node_pool);
 }
 
-// creates a dom parser with the given parameters, intializes it, and constructs the dom from the given file
-// after calling this, you can just add your data bindings and then process them
-parse_file_to_dom :: (file: string) -> (Parser, bool) {
+
+parse_file :: (file: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom      (*parser)  return .{}, false;
@@ -34,17 +30,19 @@ parse_file_to_dom :: (file: string) -> (Parser, bool) {
     return parser, true;
 }
 
-add_data_binding_to_dom :: (using parser: *Parser, binding: Any, path: string) -> bool {
+
+add_data_binding :: (using parser: *Parser, binding: Any, path: string) -> bool {
     node := find_node_by_path(parser.root_node, path);
     return add_data_binding_to_node(node, binding);
 }
 
-add_data_bindings_to_dom :: (using parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
+add_data_bindings :: (using parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
     for bindings
-        if !add_data_binding_to_dom(parser, it.binding, it.path)  
+        if !add_data_binding(parser, it.binding, it.path)  
             return false;
     return true;
 }
+
 
 process_data_bindings :: (using parser: *Parser) -> bool {
     if !process_node_binding(parser, root_node)  return false;
@@ -52,7 +50,7 @@ process_data_bindings :: (using parser: *Parser) -> bool {
 }
 
 process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
-    if node.type == {
+    if node.node_type == {
       case .OBJECT; #through;
       case .ARRAY;
         for node.children
@@ -78,6 +76,7 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
     return true;
 }
 
+
 construct_dom :: (using parser: *Parser) -> bool {
     log_unexepected_token :: (token: Token) {
         if token.type == .ERROR {
@@ -94,7 +93,7 @@ construct_dom :: (using parser: *Parser) -> bool {
     
     root_node      = New(Node);
     root_node.name = "root";
-    root_node.type = .OBJECT;
+    root_node.node_type = .OBJECT;
     
     parent := root_node;
     while L_Loop := (parent != null) {
@@ -102,7 +101,7 @@ construct_dom :: (using parser: *Parser) -> bool {
         node_type:   Node_Type;
         
         // read field name
-        if parent.type != .ARRAY {
+        if parent.node_type != .ARRAY {
             next_token = get_token(*tokenizer);
             if next_token.type == {
               case .IDENTIFIER; #through;
@@ -118,7 +117,7 @@ construct_dom :: (using parser: *Parser) -> bool {
                 break L_Loop;
                 
               case .OBJECT_END;
-                if parent.type != .OBJECT {
+                if parent.node_type != .OBJECT {
                     log_unexepected_token(next_token);
                     return false;
                 }
@@ -152,7 +151,7 @@ construct_dom :: (using parser: *Parser) -> bool {
             node_type = .ARRAY;
             
           case .ARRAY_END;
-            if parent.type != .ARRAY {
+            if parent.node_type != .ARRAY {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -168,19 +167,16 @@ construct_dom :: (using parser: *Parser) -> bool {
         
         node := append_child_node(parent);
         node.name      = name.text;
-        node.name_type = name.type;
+        node.node_type = node_type;
+        node.location  = ifx name.location.line_number then name.location else value.location;
         
-        node.type = node_type;
-        node.location = ifx name.location.line_number then name.location else value.location;
-        
-        if node.type == {
+        if node.node_type == {
           case .OBJECT; #through;
           case .ARRAY;
             parent = node;
             
           case .FIELD;
-            node.value      = value.text;
-            node.value_type = value.type;
+            node.value = value.text;
         }
     }
     
@@ -204,7 +200,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     
     io_data := get_io_data(node.binding.type);
     if io_data {
-        // because we may rebind the node, we need to assign the name_member_any
+        // because we may rebind the node, we need to assign the name_member_any ahead of time
         // if this Any is still set after making bindings to child nodes, then we will assign to it
         if io_data.name_member {
             name_member = io_data.name_member;
@@ -229,7 +225,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     // node.binding = deref_any_pointer(node.binding);
     
     // make indirect bindings onto child nodes
-    if node.type == {
+    if node.node_type == {
       case .OBJECT;
         if binding.type.type == {
           case .STRUCT;            
@@ -359,6 +355,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 return false;
             }
             if node.parent.binding.value_pointer == node.binding.value_pointer {
+                log("%:%,%: GON data binding error: invalid structure in GON array with binding to enum_flags.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
                 return false;
             }
             for node.children {
@@ -476,27 +473,20 @@ set_value_from_string :: (any: Any, text: string) -> bool {
     
     if any.type.type == {
         case .INTEGER;
+            // TODO: we do not really handle full range of u64 here, because we string_to_int with s64
+            // TODO: we also do not handle hexadecimal, octal, binary cases
             result, ok, remainder := string_to_int(text);
-            if !ok || remainder return false;
-            
-            // TODO: should add a more dynamic version of range_check_and_store in remap.jai and use that here, also reporting the out-of-range error 
-            ti_integer := any.type.(*Type_Info_Integer);
-            if ti_integer.signed {
-                valid, low, high := range_check_and_store(result, ti_integer, any.value_pointer);
-                // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
-                if !valid return false;
-            } else {
-                valid, low, high := range_check_and_store(result.(u64), ti_integer, any.value_pointer);
-                // @ToDo: We could log an error with the ranges here, similar to Command_Line.parse_and_write_integer
-                // report_parse_error(lexer, token, "The value '%' is out of range. (It must be between % and %.)", int_value, low, high);
-                if !valid return false;
+            if !ok || remainder {
+                return false;
             }
-            return true;
+            return int_to_int(any, result);
             
             
         case .FLOAT;
             value, ok, remainder := string_to_float64(text);
-            if !ok || remainder  return false;
+            if !ok || remainder  {
+                return false;
+            }
             
             if any.type.runtime_size == {
               case 4; any.value_pointer.(*float32).* = value.(float32);
@@ -548,9 +538,12 @@ set_value_from_string :: (any: Any, text: string) -> bool {
                 } else {
                     memcpy_any(any, to_any(*value));
                 }
+            } else {
+                log("Failed to parse enum value from string '%'", text);
             }
             return success;
     }
 
+    log("unsupported type in set_value_from_string");
     return false;
 }
