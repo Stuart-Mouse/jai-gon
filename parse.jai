@@ -468,80 +468,84 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
 
 // TODO: probbaly clean this up further and move into utils or remap.jai
 // modified version of set_value_from_string in Reflection.jai
-set_value_from_string :: (any: Any, text: string) -> bool {
+set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -> bool {
     if text.count <= 0  return true; // empty string -> return true
     
     if any.type.type == {
-        case .INTEGER;
-            // TODO: we do not really handle full range of u64 here, because we string_to_int with s64
-            // TODO: we also do not handle hexadecimal, octal, binary cases
-            result, ok, remainder := string_to_int(text);
-            if !ok || remainder {
-                return false;
-            }
-            return int_to_int(any, result);
-            
-            
-        case .FLOAT;
-            value, ok, remainder := string_to_float64(text);
-            if !ok || remainder  {
-                return false;
-            }
-            
-            if any.type.runtime_size == {
-              case 4; any.value_pointer.(*float32).* = value.(float32);
-              case 8; any.value_pointer.(*float64).* = value;
-            }
-            return true;
-            
-            
-        case .BOOL;
-            // OK, maybe we should be a bit more rigorous here...
-            b := (to_upper(text[0]) == #char "T");
-            any.value_pointer.(*bool).* = b; 
-            return true;
-            
-            
-        case .STRING;
-            // TODO: add conditional logic to NOT copy string if desired
-            any.value_pointer.(*string).* = copy_string(text);
-            return true;
-  
-  
-        case .ENUM;
-            enum_type := any.type.(*Type_Info_Enum);  
-            value := Small_Any.{ type = any.type };
-            success := false;
-            
-            for enum_type.names {
-                if it == text {
-                    if enum_type.runtime_size == {
-                        case 1; value.value_number.as_s\8 = enum_type.values[it_index].(s\8); 
-                        case 2; value.value_number.as_s16 = enum_type.values[it_index].(s16); 
-                        case 4; value.value_number.as_s32 = enum_type.values[it_index].(s32); 
-                        case 8; value.value_number.as_s64 = enum_type.values[it_index].(s64); 
-                    }
-                    success = true;
-                    break;
+      case .INTEGER;
+        // TODO: we do not really handle full range of u64 here, because we string_to_int with s64
+        // TODO: we also do not handle hexadecimal, octal, binary cases
+        result, ok, remainder := string_to_int(text);
+        if !ok || remainder {
+            return false;
+        }
+        return int_to_int(any, result);
+        
+        
+      case .FLOAT;
+        value, ok, remainder := string_to_float64(text);
+        if !ok || remainder  {
+            return false;
+        }
+        
+        if any.type.runtime_size == {
+          case 4; any.value_pointer.(*float32).* = value.(float32);
+          case 8; any.value_pointer.(*float64).* = value;
+        }
+        return true;
+        
+        
+      case .BOOL;
+        if text == {
+          case "true";   any.value_pointer.(*bool).* = true;
+          case "false";  any.value_pointer.(*bool).* = false;
+          case;
+            log("Error: unable to parse bool value from string: '%'", text);
+            return false;
+        }
+        return true;
+        
+        
+      case .STRING;
+        if should_copy_strings
+            then any.value_pointer.(*string).* = copy_string(text);
+            else any.value_pointer.(*string).* = text;
+        return true;
+        
+        
+      case .ENUM;
+        enum_type := any.type.(*Type_Info_Enum);  
+        value := Small_Any.{ type = any.type };
+        success := false;
+        
+        for enum_type.names {
+            if it == text {
+                if enum_type.runtime_size == {
+                    case 1; value.value_number.as_s\8 = enum_type.values[it_index].(s\8); 
+                    case 2; value.value_number.as_s16 = enum_type.values[it_index].(s16); 
+                    case 4; value.value_number.as_s32 = enum_type.values[it_index].(s32); 
+                    case 8; value.value_number.as_s64 = enum_type.values[it_index].(s64); 
                 }
+                success = true;
+                break;
             }
-            
-            if !success {
-                success = set_value_from_string(Any.{ enum_type.internal_type, *value.value_bytes }, text);
-            }
-            
-            if success {
-                if (enum_type.enum_type_flags & .FLAGS) {
-                    old_value := Small_Any.from(any);
-                    value.value_number.as_u64 |= old_value.value_number.as_u64;
-                    memcpy_any(any, to_any(*value));
-                } else {
-                    memcpy_any(any, to_any(*value));
-                }
-            } else {
-                log("Failed to parse enum value from string '%'", text);
-            }
-            return success;
+        }
+        if !success {
+            success = set_value_from_string(Any.{ enum_type.internal_type, *value.value_bytes }, text);
+        }
+        if !success {
+            log("Failed to parse enum value from string '%'", text);
+            return false;
+        }
+        
+        if (enum_type.enum_type_flags & .FLAGS) {
+            old_value := Small_Any.from(any);
+            value.value_number.as_u64 |= old_value.value_number.as_u64;
+            memcpy_any(any, to_any(*value));
+        } else {
+            memcpy_any(any, to_any(*value));
+        }
+        return true;
     }
 
     log("unsupported type in set_value_from_string");
