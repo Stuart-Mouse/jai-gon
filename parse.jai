@@ -218,7 +218,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     }
     
     defer if name_member {
-        return remap_data(name_member_any, node.name);
+        return Convert.any_to_any(name_member_any, node.name);
     }
     
     // TODO: think about whether we want to reimplement this functionality
@@ -479,7 +479,7 @@ set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -
         if !ok || remainder {
             return false;
         }
-        return int_to_int(any, result);
+        return Convert.int_to_int(any, result);
         
         
       case .FLOAT;
