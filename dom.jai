@@ -1,27 +1,4 @@
 
-Node_Flags :: enum_flags {
-    // parsing flags
-    // REFERENCES_RESOLVED;
-    // BINDING_RESOLVED;
-    // BINDING_ON_PATH;
-    
-    // ARRAY_AS_OBJECT;
-    // ARRAY_INDEXED;
-    // ARRAY_ENUMERATED;
-    
-    // PENDING_DEPENDENCY;
-    
-    // TODO: this can probably be removed
-    // used to mark that we should not try to assign the name of a gon object to the name_member of a struct
-    // DONT_ASSIGN_NAME;
-    
-    // used to indicate that a field assumes the parent object's binding, used for special field value ref syntax
-    // BIND_PARENT;
-    
-    // formatting flags
-    SAME_LINE;
-}
-
 Node_Type :: enum { 
     UNINITIALIZED :: 0;
     FIELD         :: 1;
@@ -33,8 +10,7 @@ Node :: struct {
     parent, next, prev: *Node;
     
     name:       string;
-    node_type:  Node_Type; // TODO: rename as node_type, and maybe 'using' binding
-    flags:      Node_Flags;
+    node_type:  Node_Type;
     location:   Source_Code_Location;
     
     binding:    Any;
@@ -72,33 +48,20 @@ for_expansion :: (list: *Node_List, body: Code, flags: For_Flags) #expand {
 }
 
 
-Node_Insert_Mode :: enum {
-    DEFAULT;        // just insert nodes with no extra checks
-    OVERWRITE;      // overwrite existing nodes with the same name
-    UNDERWRITE;     // don't insert node if one with the same name already exists
-}
-
-get_node_index :: (node: *Node) -> int {
-    index := 0;
-    n := node.prev;
-    while n != null {
-        index += 1;
-        n = n.prev;
-    }
-    return index;
-}
+// ===== Finding Nodes =====
 
 // TODO: add ability to index array nodes?
 // relative path only
 find_node_by_path :: (node: *Node, path: string) -> (*Node, int) {
-    if !path  return node, get_node_index(node);
     _path := path;
+    
+    if !_path  return node, get_lexical_index(node);
     index := 0;
     while node != null {
         next:, _path = path_next(_path);
         if next == ".." { 
             node  = node.parent;
-            index = get_node_index(node);
+            index = get_lexical_index(node);
         } else {
             node, index = find_child_node_by_name(node, next);
         }
@@ -109,20 +72,21 @@ find_node_by_path :: (node: *Node, path: string) -> (*Node, int) {
 
 // relative or absolute path
 find_node_by_path :: (parser: *Parser, node: *Node, path: string) -> (*Node, int) {
-    if !path  return node, get_node_index(node);
     _path := path;
-    if !_path return null, -1;
+    
+    if !_path  return node, get_lexical_index(node);
     search_from_node := node;
-    if _path[0] == #char "/" {
+    
+    is_absolute_path := _path[0] == #char "/";
+    if is_absolute_path {
         advance(*_path);
         search_from_node = parser.root_node;
     }
+    
     ret, idx := find_node_by_path(search_from_node, _path);
     return ret, idx;
 }
 
-
-// will return null if not found
 find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
     if parent.node_type != .OBJECT && parent.node_type != .ARRAY {
         return null, -1;
@@ -135,16 +99,51 @@ find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
     return null, -1;
 }
 
-append_data_node :: (parent: *Node, path: string, binding: Any, prepend: bool = false) ->  *Node {    
-    node := append_node_with_path(parent, path, prepend = prepend);
+get_lexical_index :: (node: *Node) -> int {
+    if node == null  return -1;
+    index := 0;
+    while node {
+        index += 1;
+        node = node.prev;
+    }
+    return index;
+}
+
+
+// ===== Inserting and Removing Nodes =====
+
+// Defines how to handle when an existing node resides at the same path on the DOM that we wish to insert into.
+// Be aware that the default insert modes varies based on the procedure.
+Node_Insert_Mode :: enum_flags {
+    RETURN_EXISTING :: 0;
+    OVERWRITE       :: 1;
+    ALLOW_DUPLICATE;
+    PREPEND;
+}
+
+insert_data_node :: (parent: *Node, path: string, binding: Any, insert_mode := Node_Insert_Mode.OVERWRITE) ->  *Node {    
+    node := insert_node_with_path(parent, path, insert_mode);
     if node == null  return node;
     
     node.binding = binding;
-    node.node_type = determine_node_type_for_serialization(node); // TODO: combine into one  with the below indirect data bindings one below. maybe we just inline those here for now
+    node.node_type = determine_node_type_for_serialization(node);
     
-    // make indirect bindings
+    // make indirect data bindings for objects and arrays
     if node.node_type == .OBJECT || node.node_type == .ARRAY {
-        append_nodes_for_indirect_bindings(node);
+        if node.binding.type.type == {
+          case .STRUCT;
+            iterate_struct_members(node.binding, #code {
+                insert_data_node(node, it_info.name, it);
+            });
+            
+          case .ARRAY;
+            array := Any_Array.from(node.binding.type);
+            for array {
+                // TODO: better handling for indexed and object arrays using IO data
+                elem_name: string = tprint("%", it_index);
+                insert_data_node(node, elem_name, it);
+            }
+        }
     }
     
     return node;
@@ -152,9 +151,8 @@ append_data_node :: (parent: *Node, path: string, binding: Any, prepend: bool = 
 
 // does the bare minimum to append a node, not even giving it a name
 // after the node is appended, caller should initialize it
-append_child_node :: (parent: *Node, prepend := false) ->  *Node {
+insert_child_node :: (parent: *Node, prepend := false) ->  *Node {
     node := New(Node);
-    // if !node return null;
     
     node.parent = parent;
     parent.children.count += 1;
@@ -184,50 +182,48 @@ append_child_node :: (parent: *Node, prepend := false) ->  *Node {
     return node;
 }
 
-// may be a little bit odd, but if you want tell if a node was overwritten or not, check if type == .UNINITIALIZED. if so, then the node was either created or overwritten
-get_or_add_child_node :: (parent: *Node, name: string, behavior: Node_Insert_Mode = .DEFAULT, prepend := false) ->  *Node {
+get_or_insert_child_node :: (parent: *Node, name: string, insert_mode := Node_Insert_Mode.RETURN_EXISTING) ->  *Node {
     node: *Node;
     
-    if behavior != .DEFAULT {
+    if !(insert_mode & .ALLOW_DUPLICATE) {
         node = find_child_node_by_name(parent, name);
     }
-    
     if node == null {
-        node = append_child_node(parent, prepend);
-    } 
-    else if behavior == .UNDERWRITE {
-        return node;
+        node = insert_child_node(parent, insert_mode & .PREPEND);
+    }
+    if insert_mode & .OVERWRITE {
+        node.* = .{ name = name };
     }
     
-    node.* = .{ name = name };
     return node;
 }
 
-append_node_with_path :: (parent: *Node, path: string, behavior: Node_Insert_Mode = .DEFAULT, prepend: bool = false) -> *Node {
+insert_node_with_path :: (parent: *Node, path: string, insert_mode := Node_Insert_Mode.OVERWRITE) -> *Node {
     node := parent;
-    _path := path;
     while true {
-        next:, _path = path_next(_path);
-        if !_path  return get_or_add_child_node(node, next, behavior, prepend);
+        next:, path = path_next(path);
+        if !path  return get_or_insert_child_node(node, next, insert_mode);
         
         child := find_child_node_by_name(node, next);
         if child != null {
             if child.type != .OBJECT {
-                return null; // error, we can't create a named subnode on an array or field type node
+                log("GON DOM Error: Cannot create a named child node on an array or field node.");
+                return null;
             }
             node = child;
             continue;
         }
         
-        node      = append_child_node(node, prepend);
-        node.name = next;
+        node           = insert_child_node(node, insert_mode & .PREPEND);
+        node.name      = next;
         node.node_type = .OBJECT;
     }
     
-    assert(false, "unreachable");
+    unreachable();
     return null;
 }
 
+// does not deallocate node, since we use a flat pool for node allocation
 remove_node :: (node: *Node) {
     node.parent.children.count -= 1;
     if node.next != null  node.next.prev = node.prev;
@@ -236,75 +232,52 @@ remove_node :: (node: *Node) {
     if node.parent.children.last  == node  node.parent.children.last  = node.prev;
 }
 
-clone_child_nodes_recursive :: (dst: *Node, src: *Node) -> bool {
-    for child: src.children {
-        node := append_child_node(dst, false);
-        if !clone_node_recursive(node, child)  return false;
-    }
-    return true;
-}
+// clone_child_nodes_recursive :: (dst: *Node, src: *Node) -> bool {
+//     for child: src.children {
+//         node := insert_child_node(dst, false);
+//         if !clone_node_recursive(node, child)  return false;
+//     }
+//     return true;
+// }
 
-clone_node_recursive :: (dst: *Node, src: *Node) -> bool {    
-    dst.name         = src.name;
-    dst.type         = src.type;
-    dst.flags        = src.flags;
-    dst.binding = src.binding;
-    dst.content      = .{};
+// clone_node_recursive :: (dst: *Node, src: *Node) -> bool {    
+//     dst.name         = src.name;
+//     dst.type         = src.type;
+//     dst.flags        = src.flags;
+//     dst.binding = src.binding;
+//     dst.content      = .{};
     
-    if src.type == {
-      case .OBJECT; #through;
-      case .ARRAY;
-        return clone_child_nodes_recursive(dst, src);
+//     if src.type == {
+//       case .OBJECT; #through;
+//       case .ARRAY;
+//         return clone_child_nodes_recursive(dst, src);
         
-      case .FIELD;
-        dst.value = src.value;
+//       case .FIELD;
+//         dst.value = src.value;
         
-      case .UNINITIALIZED;
-        return false;
-    }
+//       case .UNINITIALIZED;
+//         return false;
+//     }
     
-    return true;
-}
+//     return true;
+// }
+
+// ===== Format Node Path =====
 
 format_node_path :: (node: *Node) -> string {
     builder: String_Builder;
     init_string_builder(*builder);
-    append_node_path_to_string_builder(*builder, node);
+    format_node_path(*builder, node);
     return builder_to_string(*builder);
 }
 
-append_node_path_to_string_builder :: (builder: *String_Builder, node: *Node) {
+format_node_path :: (builder: *String_Builder, node: *Node) {
     if node.parent != null {
-        append_node_path_to_string_builder(builder, node.parent);
+        format_node_path(builder, node.parent);
         append(builder, "/");
     }
     append(builder, node.name);
 }
-
-
-
-is_indexed_array :: (node: *Node) -> bool {
-    if node == null
-    || node.node_type != .OBJECT 
-    || node.binding.type == null 
-    || node.binding.type.type != .ARRAY  
-        return false;
-    
-    io_data := get_io_data(node.binding.type);
-    return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
-}
-
-is_object_array :: (node: *Node) -> bool {
-    if node == null
-    || node.node_type != .OBJECT 
-    || node.binding.type == null 
-    || node.binding.type.type != .ARRAY  
-        return false;
-    
-    element_io_data := get_io_data(node.binding.type.(*Type_Info_Array).element_type);
-    return element_io_data != null && element_io_data.name_member != null;
-}
-
 
 
 #scope_module
@@ -318,10 +291,22 @@ is_object_array :: (node: *Node) -> bool {
     The procedure does not currently do anything special to validate the content of the string, but perhaps we should?
     The caller will also have to check if the path is absolute or relative manually before they start splitting the path.
 */
-
 path_next :: (path: string) -> (next: string, remaining: string, ok: bool) {
     found, left, right := split_from_left_by_any(path, "/\\");
     if !found  return path, "", true;
     return left, right, true;
+}
+
+
+// helper function that I may remove if I go back to just flagging the node...
+is_indexed_array :: (node: *Node) -> bool {
+    if node == null
+    || node.node_type != .OBJECT 
+    || node.binding.type == null 
+    || node.binding.type.type != .ARRAY  
+        return false;
+    
+    io_data := get_io_data(node.binding.type);
+    return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
 }
 

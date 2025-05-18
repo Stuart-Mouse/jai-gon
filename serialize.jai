@@ -24,7 +24,7 @@ serialize_to_file :: (using parser: *Parser, file_path: string) -> bool {
 }
 
 serializer_insert_binding :: (parser: *Parser, path: string, binding: Any, prepend: bool = false) {
-    append_data_node(parser.root_node, path, binding, prepend);
+    insert_data_node(parser.root_node, path, binding, prepend);
 }
 
 
@@ -33,17 +33,15 @@ serializer_insert_binding :: (parser: *Parser, path: string, binding: Any, prepe
 // We could convert this to an iterative process rather than a recursive one relatively easily,
 //      because we don't currently have any need to use the stack to hold state.
 // May be worth considering later once functionality is more complete.
-serialize_node :: (using parser: *Parser, node: *Node) -> bool {
+serialize_node :: (using parser: *Parser, node: *Node, same_line := false) -> bool {
     if parser == null || node == null  return false;
     
     in_array       := false;
     is_first_child := false;
-    same_line      := false;
 
     if node.parent != null {
         in_array       = node.parent.node_type == .ARRAY;
         is_first_child = node == node.parent.children.first;
-        same_line      = (.SAME_LINE & node.parent.flags).(bool);      // check for sameline on parent, not self (we do that later)
     }
     
     if (same_line || in_array) && !is_first_child 
@@ -70,11 +68,10 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
       case .OBJECT; #through;
       case .ARRAY;
         // ensure that end of object/array gets printed on same line if sameline flag is set on self
-        same_line ||= (.SAME_LINE & node.flags).(bool);
+        // same_line ||= (.SAME_LINE & node.flags).(bool);
         
         is_array := (node.node_type == .ARRAY);
         if is_array && node.children.first && do_sameline_for_type(node.children.first.binding.type) {
-            node.flags |= .SAME_LINE;
             same_line = true;
         }
         
@@ -83,7 +80,7 @@ serialize_node :: (using parser: *Parser, node: *Node) -> bool {
         // recurse for children
         indent += 1;
         for child: node.children 
-            if !serialize_node(parser, child)  
+            if !serialize_node(parser, child, same_line)  
                 then return false;
         indent -= 1;
         
@@ -165,44 +162,6 @@ determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
     }
     
     return .INVALID;
-}
-
-append_nodes_for_indirect_bindings :: (node: *Node) {
-    if node == null || node.binding.value_pointer == null  return;
-    
-    if node.binding.type.type == {
-      case .STRUCT;
-        ti_struct := node.binding.type.(*Type_Info_Struct);
-        for ti_struct.members {
-            member_any := Any.{
-                value_pointer = node.binding.value_pointer + it.offset_in_bytes,
-                type          = it.type,
-            };
-            // figure out whether to prepend elems (will do for things that need to be attrs)
-            append_data_node(node, it.name, member_any);
-        }
-        return;
-        
-      case .ARRAY;
-        ti_array := node.binding.type.(*Type_Info_Array);
-    
-        // TODO: use get_array_count_and_data?
-        count, data := get_array_count_and_data(node.binding.value_pointer, ti_array);
-        if count == 0 || data == null  return;
-        
-        for 0..elem_count-1 {
-            elem_any := Any.{
-                value_pointer = data + (ti_array.element_type.runtime_size * it),
-                type          = ti_array.element_type
-            };
-            
-            // TODO: as indexed, as object
-            elem_name: string = tprint("%", it);
-            append_data_node(node, elem_name, elem_any);
-        }
-        
-        return;
-    }
 }
 
 do_sameline_for_type :: (ti: *Type_Info) -> bool {

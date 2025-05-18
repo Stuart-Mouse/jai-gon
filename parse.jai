@@ -165,7 +165,7 @@ construct_dom :: (using parser: *Parser) -> bool {
         
         assert(node_type != .UNINITIALIZED);
         
-        node := append_child_node(parent);
+        node := insert_child_node(parent);
         node.name      = name.text;
         node.node_type = node_type;
         node.location  = ifx name.location.line_number then name.location else value.location;
@@ -466,7 +466,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
 }
 
 
-// TODO: probbaly clean this up further and move into utils or remap.jai
+// TODO: probbaly clean this up further and move into Convert.jai
 // modified version of set_value_from_string in Reflection.jai
 set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -> bool {
     if text.count <= 0  return true; // empty string -> return true
@@ -534,7 +534,7 @@ set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -
             success = set_value_from_string(Any.{ enum_type.internal_type, *value.value_bytes }, text);
         }
         if !success {
-            log("Failed to parse enum value from string '%'", text);
+            log("Error: failed to parse enum value from string '%'", text);
             return false;
         }
         
@@ -548,6 +548,6 @@ set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -
         return true;
     }
 
-    log("unsupported type in set_value_from_string");
+    log("Error: unsupported type in set_value_from_string()");
     return false;
 }
