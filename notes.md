@@ -49,6 +49,8 @@ We are very close to being able to completely remove node flags, but I didnt fee
     and I'm also somewhat hesitant about removing .ARRAY_INDEXED and .ARRAY_AS_OBJECT
     maybe we will want to add these back in behind some interface proc so that we can change things around in future if needed
 
+    did go through with removing these, will see how it plays out long term
+
 Lexer improvements
     I think it would be beneficial to lex numbers, identifiers, and strings as distinct tokens 
     then maybe we just store the 'name' and 'value' tokens on each node, so that we preserve info about the token type into the data binding stage
@@ -72,7 +74,19 @@ maybe rewrite a sax version of the parser...
             child must check parent binding and figure out its own binding accordingly, 
             rather than having it's binding assigned to it by parent
         
+
+serialization fixes
+    reimplement SKIP_IF_EMPTY
+    reimplement SKIP_ELEMS_IF_EMPTY
+    remove .AS_OBJECT io data flag, just check if element type io data has name member defined
+    
+need to finish writing some basic test cases?
+    at least need to manually test stuff again before publishing
         
+
+try to remove some dependencies on Convert.jai and Utils module if possible?
+    can't really, now that we use scanner.jai and just moved out set_value_form_string...
+
 
 ## Directives
 
@@ -89,3 +103,5 @@ What can directives do?
     
     
     
+
+
