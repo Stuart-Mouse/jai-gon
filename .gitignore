@@ -5,5 +5,4 @@ build/
 *.raddbgi
 *.rdi
 
-examples/test.jai
 examples/.build
