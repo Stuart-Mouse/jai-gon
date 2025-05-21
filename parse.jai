@@ -11,10 +11,9 @@ Parser :: struct {
     get_allocator_for_node: #type (*Node) -> Allocator;
 };
 
-init_parser :: (parser: *Parser, file: string, filepath := "") {
+init_parser :: (parser: *Parser, file: string, file_path := "") {
     reset(*parser.node_pool, overwrite_memory = true);
-    parser.tokenizer.file = file;
-    init_lexer(*parser.tokenizer, filepath);
+    init_lexer(*parser.tokenizer, file, file_path);
 }
 
 deinit_parser :: (using parser: *Parser) {
@@ -475,11 +474,11 @@ set_value_from_string :: (any: Any, text: string, should_copy_strings := true) -
       case .INTEGER;
         // TODO: we do not really handle full range of u64 here, because we string_to_int with s64
         // TODO: we also do not handle hexadecimal, octal, binary cases
-        result, ok, remainder := string_to_int(text);
+        result, ok, remainder := parse_number(text);
         if !ok || remainder {
             return false;
         }
-        return Convert.int_to_int(any, result);
+        return Convert.int_to_int(any, to_any(*result));
         
         
       case .FLOAT;

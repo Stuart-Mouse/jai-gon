@@ -179,7 +179,7 @@ to_conformant_string :: (str: string, force_quotes := false) -> string {
     if str == ""  return copy_string("\"\"");
     
     sb: String_Builder;
-    write_quotes := force_quotes || (str.count == 0) || find_index_of_any_from_left(str, whitespace_and_reserved_chars) >= 0;
+    write_quotes := force_quotes || str.count == 0 || !is_legal_identifier(str);
     
     if write_quotes  append(*sb, "\"");
     for char: str {
