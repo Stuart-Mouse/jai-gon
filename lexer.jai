@@ -85,7 +85,8 @@ lex_next_token :: (using lexer: *Lexer) -> Token {
     if token_text  return .{ .IDENTIFIER, token_text, token_location };
     
     // parse string
-    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
+    // NOTE: only supporting reqular (double) quotes at the moment due to the fact that we don't preserve info about what type of quotes parsed in file.
+    if file[0] == #char "\"" { 
         quote_char := file[0];
         
         if !advance(lexer)  return make_error_token("Unexpected EOF while parsing string", token_location);

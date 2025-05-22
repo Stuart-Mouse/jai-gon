@@ -121,27 +121,85 @@ Node_Insert_Mode :: enum_flags {
     PREPEND;
 }
 
-insert_data_node :: (parent: *Node, path: string, binding: Any, insert_mode := Node_Insert_Mode.OVERWRITE) ->  *Node {    
+insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any, insert_mode := Node_Insert_Mode.OVERWRITE) -> *Node {    
+    if binding.type == null {
+        log("Error: cannot insert data node with null binding.");
+        return null;
+    }
+    
+    push_allocator(get_pool_allocator(*parser.node_pool));
+    if parent == null  parent = parser.root_node;
+    
     node := insert_node_with_path(parent, path, insert_mode);
     if node == null  return node;
     
+    
+    // determine node type for inserted data node
     node.binding = binding;
-    node.node_type = determine_node_type_for_serialization(node);
+    io_data := get_io_data(node.binding.type);
+    
+    if node.binding.type.type == {
+      case .INTEGER; #through;
+      case .FLOAT;   #through;
+      case .STRING;  #through;
+      case .BOOL;  
+        node.node_type = .FIELD;
+        
+      case .ENUM;
+        ti_enum := node.binding.type.(*Type_Info_Enum);
+        if ti_enum.enum_type_flags & .FLAGS {
+            node.node_type = ifx node.parent && node.parent.binding.value_pointer == node.binding.value_pointer
+                             then .FIELD else .ARRAY;
+        }
+        else node.node_type = .FIELD;
+        
+      case .ARRAY;
+        // arrays of u8 are serialized as string
+        // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
+        ti_array := node.binding.type.(*Type_Info_Array);
+        if ti_array.element_type.runtime_size == 1 {
+            node.node_type = .FIELD;
+        }
+        // indexed arrays and arrays containing struct with defined name member will serialize as gon objects
+        else if io_data && (.ARRAY_INDEXED & io_data.flags) {
+            node.node_type = .OBJECT;
+        }
+        else if ti_array.element_type.type == .STRUCT {
+            element_io_data := get_io_data(ti_array.element_type);
+            if element_io_data && element_io_data.name_member {
+                node.node_type = .OBJECT;
+            }
+        }
+        else node.node_type = .ARRAY;
+        
+      case .STRUCT;
+        node.node_type = ifx io_data && (io_data.flags & .AS_ARRAY) 
+                         then .ARRAY else .OBJECT;
+    }
+    
+    if node.node_type == .UNINITIALIZED {
+        log("Error: unable to determine node type for data node. (binding.type = %, parent.binding.type = %)", node.binding.type, node.parent.binding.type);
+    }
+    
     
     // make indirect data bindings for objects and arrays
     if node.node_type == .OBJECT || node.node_type == .ARRAY {
         if node.binding.type.type == {
           case .STRUCT;
             iterate_struct_members(node.binding, #code {
-                insert_data_node(node, it_info.name, it);
+                insert_data_node(parser, node, it_info.name, it);
             });
             
           case .ARRAY;
-            array := Any_Array.from(node.binding.type);
+            array := Any_Array.from(node.binding);
+            element_io_data := get_io_data(array.element_type);
             for array {
                 // TODO: better handling for indexed and object arrays using IO data
-                elem_name: string = tprint("%", it_index);
-                insert_data_node(node, elem_name, it);
+                elem_name: string;
+                if element_io_data && element_io_data.name_member
+                    then Convert.any_to_any(elem_name, get_member_any(it.value_pointer, element_io_data.name_member));
+                    else elem_name = tprint("%", it_index);
+                insert_data_node(parser, node, elem_name, it);
             }
         }
     }
@@ -182,31 +240,37 @@ insert_child_node :: (parent: *Node, prepend := false) ->  *Node {
     return node;
 }
 
-get_or_insert_child_node :: (parent: *Node, name: string, insert_mode := Node_Insert_Mode.RETURN_EXISTING) ->  *Node {
+get_or_insert_child_node :: (parent: *Node, name: string, insert_mode := Node_Insert_Mode.RETURN_EXISTING) -> *Node {
     node: *Node;
     
     if !(insert_mode & .ALLOW_DUPLICATE) {
         node = find_child_node_by_name(parent, name);
     }
     if node == null {
-        node = insert_child_node(parent, insert_mode & .PREPEND);
+        node = insert_child_node(parent, insert_mode & .PREPEND == .PREPEND);
+        node.name = name;
     }
-    if insert_mode & .OVERWRITE {
-        node.* = .{ name = name };
+    else if insert_mode & .OVERWRITE {
+        // need to reset only certain fields, so we don't break connections between nodes
+        node.name      = name;
+        node.node_type = .UNINITIALIZED;
+        node.binding   = Any.{};
+        node.content   = .{};
     }
     
     return node;
 }
 
 insert_node_with_path :: (parent: *Node, path: string, insert_mode := Node_Insert_Mode.OVERWRITE) -> *Node {
+    _path := path;
     node := parent;
     while true {
-        next:, path = path_next(path);
-        if !path  return get_or_insert_child_node(node, next, insert_mode);
+        next:, _path = path_next(_path);
+        if !_path  return get_or_insert_child_node(node, next, insert_mode);
         
         child := find_child_node_by_name(node, next);
         if child != null {
-            if child.type != .OBJECT {
+            if child.node_type != .OBJECT {
                 log("GON DOM Error: Cannot create a named child node on an array or field node.");
                 return null;
             }
@@ -214,7 +278,7 @@ insert_node_with_path :: (parent: *Node, path: string, insert_mode := Node_Inser
             continue;
         }
         
-        node           = insert_child_node(node, insert_mode & .PREPEND);
+        node           = insert_child_node(node, insert_mode & .PREPEND == .PREPEND);
         node.name      = next;
         node.node_type = .OBJECT;
     }

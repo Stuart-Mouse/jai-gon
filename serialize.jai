@@ -33,8 +33,16 @@ serializer_insert_binding :: (parser: *Parser, path: string, binding: Any, prepe
 // We could convert this to an iterative process rather than a recursive one relatively easily,
 //      because we don't currently have any need to use the stack to hold state.
 // May be worth considering later once functionality is more complete.
-serialize_node :: (using parser: *Parser, node: *Node, same_line := false) -> bool {
+serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_if_empty := false) -> bool {
     if parser == null || node == null  return false;
+    
+    io_data := get_io_data(node.binding.type);
+    
+    if skip_if_empty || (io_data && (io_data.flags & .SKIP_ELEMS_IF_EMPTY)) {
+        if all_bytes_are_zero(node.binding) {
+            return true;
+        }
+    }
     
     in_array       := false;
     is_first_child := false;
@@ -55,34 +63,86 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false) -> bo
     }
     
     if !in_array {
-        append(*builder, to_conformant_string(node.name,, temp));
+        if is_legal_identifier(node.name) 
+            then append(*builder, node.name);
+            else append_gon_string(*builder, node.name);
         append(*builder, " ");
     }
-    
-    // For debugging, seeing type of data binding
-    // if node.binding.value_pointer {
-    //     print_to_builder(*builder, "(%) ", (cast(*Type) *node.binding.type).*);
-    // }
     
     if node.node_type == {
       case .OBJECT; #through;
       case .ARRAY;
-        // ensure that end of object/array gets printed on same line if sameline flag is set on self
-        // same_line ||= (.SAME_LINE & node.flags).(bool);
+        should_skip_empty_elements := io_data && (io_data.flags & .SKIP_ELEMS_IF_EMPTY);
         
         is_array := (node.node_type == .ARRAY);
-        if is_array && node.children.first && do_sameline_for_type(node.children.first.binding.type) {
-            same_line = true;
+        if is_array && node.children.first {
+            element_type := node.children.first.binding.type;
+            same_line |= element_type      == null
+                      || element_type.type == .INTEGER
+                      || element_type.type == .FLOAT 
+                      || element_type.type == .ENUM; 
         }
         
         append(*builder, ifx is_array then "[" else "{");
         
-        // recurse for children
-        indent += 1;
-        for child: node.children 
-            if !serialize_node(parser, child, same_line)  
-                then return false;
-        indent -= 1;
+        // special case for serializing enum flags
+        // we ignore child nodes and just write the array of flags values directly
+        if node.binding.type && node.binding.type.type == .ENUM {
+            ti_enum := node.binding.type.(*Type_Info_Enum);
+            assert(ti_enum.enum_type_flags & .FLAGS == .FLAGS); 
+            same_line = true; // currently always on one line
+
+            // NOTE: the below logic for printing the enum_flags values has been copied from Print.jai
+            
+            target_value := get_u64_from_void_pointer(node.binding.value_pointer, node.binding.type.runtime_size);  // Treat flags as unsigned, even for signed types. Simpler.
+
+            if target_value == 0 {
+                // Check for a named 0-value before printing 0.
+                name := "0";
+                for ti_enum.values  if it == 0 {
+                    name = ti_enum.names[it_index];
+                    break;
+                }
+                
+                append(*builder, name);
+                return true;
+            }
+
+            // I felt like doing this in unsigned for some reason!
+            flags_total := target_value;
+            flags_printed : u64 = 0;
+
+            first := true;
+            for ti_enum.values {
+                value := cast(u64) it;
+                matching := flags_total & value;
+                if matching != value  matching = 0;  // We need to match all of the bits in the enum member.
+
+                if !matching continue;
+                if !(matching & ~flags_printed) continue;
+
+                flags_printed |= matching;
+
+                if first  append(*builder, " ");
+                else      append(*builder, ", ");
+                append(*builder, ti_enum.names[it_index]);
+                first = false;
+            }
+
+            unmatched := flags_total & ~flags_printed;
+            if unmatched {
+                if !first  append(*builder, ", 0x");
+                format := FormatInt.{base=16};
+                print_u64_base_n(*builder, unmatched, format);
+            }
+        } else {
+            // recurse for children
+            indent += 1;
+            for child: node.children 
+                if !serialize_node(parser, child, same_line, should_skip_empty_elements)  
+                    then return false;
+            indent -= 1;
+        }
         
         if same_line {
             append(*builder, " ");
@@ -95,103 +155,67 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false) -> bo
         
       case .FIELD;
         // TODO: should probably switch on node.value.type
-        string_value := node.value;
-        if string_value == "" {
-            if node.binding.value_pointer == null {
-                log("ERROR: no value defined for node '%v'\n", format_node_path(node));
-                return false;
-            }
-            
-            // TODO: callback for custom serialization?
-            string_value = tprint("%", node.binding); 
+        if node.binding.type {
+            append_field_value(*builder, node.binding);
+        } else if node.value {
+            append_field_value(*builder, node.value);
+        } else {
+            // TODO: maybe we can pass void as the value as a special case ?
+            //       but this will not work as we still need the value type...
+            //       and at this point we've already written the field name, so can't back out
+            //       maybe we should jsut check if field is valid before writing the name. 
+            //       any field which has no binding or string value should just be omitted
+            log("Error: no value defined for node '%v'\n", format_node_path(node));
+            return false;
         }
-        append(*builder, to_conformant_string(string_value,, allocator = temp));
     }
     
     return true;
 }
 
-// determination is currently made based only on node's data binding and parent's data binding, but we will probably consider some other flags on the node later
-// the type set here is authoritative, so when we go to actually serialize a node later, it must be serializable as this type
-determine_node_type_for_serialization :: (node: *Node) -> Node_Type {
-    if node.binding.value_pointer == null  return .OBJECT;
-    
-    io_data := table_find_pointer(*IO_Data_Lookup, node.binding.type);
-    
-    if node.binding.type.type == {
-      case .INTEGER; #through;
-      case .FLOAT;   #through;
-      case .STRING;  #through;
-      case .BOOL;  
-        return .FIELD;
+append_gon_string :: (builder: *String_Builder, text: string, quote_char: u8 = #char "\"") -> bool {
+    append(builder, quote_char);
+    ok := revert_escape_sequences(builder, text);
+    append(builder, quote_char);
+    return ok;
+}
+
+append_field_value :: (builder: *String_Builder, value: Any) -> bool {
+    if value.type.type == {
+      case .STRING;
+        // always enclose in quotes and escape any characters which need to be escaped
+        // for GON we really should only need to escape quotation marks and backslashes
+        append_gon_string(builder, value.value_pointer.(*string).*);
+        
+      case .INTEGER;    #through;
+      case .FLOAT;      #through;
+      case .BOOL;
+        print(builder, "%", value);
         
       case .ENUM;
-        ti_enum := node.binding.type.(*Type_Info_Enum);
-        if !(ti_enum.enum_type_flags & .FLAGS) {
-            return .FIELD;
-        }
-        // check if parent data binding is the same.
-        if node.parent && node.parent.binding.value_pointer == node.binding.value_pointer {
-            return .FIELD;
-        }
-        node.flags |= .SAME_LINE;
-        return .ARRAY;
-        
-      case .ARRAY;
-        // arrays of bytes/u8 are serialized as string
-        // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
-        ti_array := node.binding.type.(*Type_Info_Array);
-        if ti_array.element_type.runtime_size == 1 {
-            return .FIELD;
-        }
-        if io_data {
-            if (.AS_OBJECT     & io_data.serialize.flags) ||
-               (.ARRAY_INDEXED & io_data.serialize.flags) {
-                return .OBJECT;
-            }
-        }
-        return .ARRAY;
+        // assert not enum_flags
+        ti_enum := value.type.(*Type_Info_Enum);
+        assert(ti_enum.enum_type_flags & .FLAGS == 0);
+        print(builder, "%", value);
         
       case .STRUCT;
-        if io_data {
-            if .AS_ARRAY & io_data.serialize.flags {
-                return .ARRAY;
-            }
+        // require custom serialization proc
+        io_data := get_io_data(value.type);
+        if !io_data || !io_data.serialize_proc {
+            log("Error: unable to serialize struct as GON field without a custom serialization proc.");
+            return false;
         }
-        return .OBJECT;
+        string_value, ok := io_data.serialize_proc(value);
+        append_gon_string(builder, string_value);
+        
+      case .ARRAY;
+        ti_array := value.type.(*Type_Info_Array);
+        assert(ti_array.element_type.runtime_size == 1);
+        
+        array_count, array_data := get_array_count_and_data(ti_array, value.value_pointer);
+        append_gon_string(builder, string.{ array_count, array_data });
     }
-    
-    return .INVALID;
-}
-
-do_sameline_for_type :: (ti: *Type_Info) -> bool {
-    return ti      == null
-        || ti.type == .INTEGER
-        || ti.type == .FLOAT 
-        || ti.type == .ENUM;
-}
-
-is_escaped_char :: (char: u8) -> bool {
-    return char == #char "\\" || char == #char "\"";
-}
-
-to_conformant_string :: (str: string, force_quotes := false) -> string {
-    if str == ""  return copy_string("\"\"");
-    
-    sb: String_Builder;
-    write_quotes := force_quotes || str.count == 0 || !is_legal_identifier(str);
-    
-    if write_quotes  append(*sb, "\"");
-    for char: str {
-        if char == 0  break;
-        if is_escaped_char(char) {
-            append(*sb, "\\");
-        }
-        append(*sb, char);
-    }
-    if write_quotes  append(*sb, "\"");
-    
-    return builder_to_string(*sb);
+    return true;
 }
 
 #scope_file

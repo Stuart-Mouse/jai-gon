@@ -1,18 +1,16 @@
 
-"things": {
-    "Thing 1": {
-        "numbers":     [ 1, 2, 3, 4, 5 ],
-        "fraction":    35.35,
-        "text":        "this is a string",
-        "flags":       [ FIRST, THIRD ],
-        "fruit":       APPLE,
+things {
+    "Thing 1" {
+        numbers     [ 1, 2, 3, 4, 5 ],
+        text        "this is a string",
+        flags       [ FIRST, THIRD ],
+        fruit       APPLE,
     },
-    "Thing 2": {
-        "numbers":     [ 5, 4, 3, 2, 1],
-        "fraction":    53.53,
-        "text":        "this is another string",
-        "flags":       [ SECOND, FIRST ],
-        "fruit":       BANANA,
+    "Thing 2" {
+        numbers     [ 5, 4, 3, 2, 1 ],
+        fraction    53.53,
+        text        "this is \"another\" string",
+        fruit       BANANA,
     },
 }
 

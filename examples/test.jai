@@ -1,8 +1,11 @@
 #import "Basic"()(MEMORY_DEBUGGER=true);
 #import "File";
 #import "Math";
+#import "Reflection";
+
 #import "Utils";
-using,except(set_value_from_string) Reflection :: #import "Reflection";
+Convert :: #import "Convert";
+
 #import "GON"()();
 
 Thing :: struct {
@@ -44,6 +47,7 @@ main :: () {
             
             add_io_data(Thing, .{
                 name_member = get_field(type_info(Thing), "name"),
+                flags = .SKIP_ELEMS_IF_EMPTY
             });
             
             file, ok := read_entire_file("test.gon");
@@ -61,9 +65,18 @@ main :: () {
                 return;
             }
             
-            output:, ok = serialize_to_string(*parser);
-            defer free(output);
-            if ok  print("%\n", output);
+            {
+                serializer: Parser;
+                init_parser(*serializer, "");
+                insert_data_node(*serializer, null, "things", things);
+                
+                output, ok := serialize_to_string(*serializer);
+                // output, ok := serialize_to_string(*parser);
+                defer free(output);
+                if ok  print("%\n", output);
+                
+                write_entire_file("test_output.gon", output);
+            }
             
             print("%\n", things);
         }
@@ -122,9 +135,9 @@ main :: () {
                 info := it.type.(*Type_Info_Integer);
                 
                 test :: (ti: *Type_Info, str: string, expect_success: bool) {
-                    number := Small_Any.{ type = ti };
+                    number := Any_Number.{ type = ti };
                     log("\t\tinput string: '%'", str);
-                    if set_value_from_string(to_any(*number), str) == expect_success {
+                    if Convert.set_value_from_string(to_any(*number), str) == expect_success {
                         log("\t\tTEST PASSED");
                     } else {
                         log("\t\tTEST FAILED");
@@ -156,20 +169,20 @@ main :: () {
             
             // test float and double
             _float32: float32;
-            assert(set_value_from_string(_float32, "3") == true);
-            assert(set_value_from_string(_float32, "3.5") == true);
-            assert(set_value_from_string(_float32, "text") == false);
-            assert(set_value_from_string(_float32, "3.5text") == false);
-            assert(set_value_from_string(_float32, "text3.5") == false);
-            assert(set_value_from_string(_float32, "3.5.5") == false);
+            assert(Convert.set_value_from_string(_float32, "3") == true);
+            assert(Convert.set_value_from_string(_float32, "3.5") == true);
+            assert(Convert.set_value_from_string(_float32, "text") == false);
+            assert(Convert.set_value_from_string(_float32, "3.5text") == false);
+            assert(Convert.set_value_from_string(_float32, "text3.5") == false);
+            assert(Convert.set_value_from_string(_float32, "3.5.5") == false);
             
             _float64: float64;
-            assert(set_value_from_string(_float64, "3") == true);
-            assert(set_value_from_string(_float64, "3.5") == true);
-            assert(set_value_from_string(_float64, "text") == false);
-            assert(set_value_from_string(_float64, "3.5text") == false);
-            assert(set_value_from_string(_float64, "text3.5") == false);
-            assert(set_value_from_string(_float64, "3.5.5") == false);
+            assert(Convert.set_value_from_string(_float64, "3") == true);
+            assert(Convert.set_value_from_string(_float64, "3.5") == true);
+            assert(Convert.set_value_from_string(_float64, "text") == false);
+            assert(Convert.set_value_from_string(_float64, "3.5text") == false);
+            assert(Convert.set_value_from_string(_float64, "text3.5") == false);
+            assert(Convert.set_value_from_string(_float64, "3.5.5") == false);
             
             // test enum and enum_flags
             

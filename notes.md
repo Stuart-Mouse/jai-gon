@@ -48,7 +48,6 @@ For user extension, will introduce something like directives which should be rel
 We are very close to being able to completely remove node flags, but I didnt feel like refactoring the sameline stuff for serialization just yet
     and I'm also somewhat hesitant about removing .ARRAY_INDEXED and .ARRAY_AS_OBJECT
     maybe we will want to add these back in behind some interface proc so that we can change things around in future if needed
-
     did go through with removing these, will see how it plays out long term
 
 Lexer improvements
@@ -60,32 +59,18 @@ Lexer improvements
             identifier could gain special usage in other cases if disambiguated from string?
         this is actually not working out really, no real point to keeping the token type after lexing
         
-add better logging functions a la tbd module
 
-maybe rewrite a sax version of the parser...
-    will be less code than the dom, can probably reduce disparity between the two in terms of funcitonality more than I could have before
-    especially since we now have a real lexer, it should basically just be a single function
 
-    SAX annoyances
-        processing field paths is dumb, even with the changes I made this time
-            still need to check depth of match against current recursion depth, manually disable field paths that were not found
-        
-        parent bindings will require entirely differnet logic than the way indirect data bindings are done on DOM
-            child must check parent binding and figure out its own binding accordingly, 
-            rather than having it's binding assigned to it by parent
-        
+add better logging functions a la tbd module report_parse_error
 
-serialization fixes
-    reimplement SKIP_IF_EMPTY
-    reimplement SKIP_ELEMS_IF_EMPTY
-    remove .AS_OBJECT io data flag, just check if element type io data has name member defined
-    
 need to finish writing some basic test cases?
     at least need to manually test stuff again before publishing
-        
-
+    
 try to remove some dependencies on Convert.jai and Utils module if possible?
     can't really, now that we use scanner.jai and just moved out set_value_form_string...
+
+make sure that all DOM functions which allocate take the parser as first parameter 
+    so that we can make sure pool allocator is set properly
 
 
 ## Directives
