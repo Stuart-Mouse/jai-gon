@@ -11,6 +11,13 @@ NOTE: This parser recently underwent a major cleanup / refactoring, and I am now
 I would like to make this version of the parser as versatile as possible while still keeping it small and simple. 
 For a more complex solution with more features, you should check out my LSD data file parser, which is essentially a branch of GON that finally outgrew this repository and flew the coop.
 
+
+## Dependencies
+
+This module depends on my [Utils](https://github.com/Stuart-Mouse/jai-utils) and [Convert](https://github.com/Stuart-Mouse/jai-convert) modules.
+Sorry to make you go download more stuff, I really would prefer if I didn't need the dependencies, but it had become untennable to maintain all of the duplicated code across my modules.
+
+
 ## Overview
 
 GON files consist of three basic strucutres: fields, objects, and arrays.
@@ -49,6 +56,13 @@ Any of the following data types can be bound to a GON array:
     - all arrays
     - enums_flags
     
+    
+#### Examples
+
+```
+TODO: PUT EXAMPLES HERE
+```
+
 
 ## IO Data
 

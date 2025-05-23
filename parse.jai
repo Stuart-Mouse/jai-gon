@@ -3,21 +3,20 @@ Parser :: struct {
     tokenizer:  Lexer;
     node_pool:  Flat_Pool;
     root_node:  *Node;
-    
-    // serialization stuff
-    builder:    String_Builder;
-    indent:     int;
-    
-    get_allocator_for_node: #type (*Node) -> Allocator;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
     reset(*parser.node_pool, overwrite_memory = true);
     init_lexer(*parser.tokenizer, file, file_path);
     
-    parser.root_node      = New(Node,, get_pool_allocator(*parser.node_pool));
-    parser.root_node.name = "root";
-    parser.root_node.node_type = .OBJECT;
+    // NOTE: We unfortunately do have to allocate this node in the pool, 
+    //       otherwise its address could change if the parser gets passed around.
+    //       Were it not for this, we wouldn't even necessarily need the init proc so much.
+    parser.root_node = New(Node,, get_pool_allocator(*parser.node_pool));
+    parser.root_node.* = .{
+        name      = "root",
+        node_type = .OBJECT,
+    };
 }
 
 deinit_parser :: (using parser: *Parser) {
@@ -25,32 +24,55 @@ deinit_parser :: (using parser: *Parser) {
 }
 
 
-parse_file :: (file: string) -> (Parser, bool) {
+// ========== Load and Parse ==========
+
+load_and_parse_file_with_bindings :: (file_path: string, bindings: ..Binding_With_Path) -> Parser, bool {
+    file, ok := read_entire_file(file_path);
+    if !ok  return .{}, false;
+    parser:, ok = parse_file(file, file_path);
+    return parser, ok;
+}
+
+load_and_parse_file :: (file_path: string) -> Parser, bool {
+    file, ok := read_entire_file(file_path);
+    if !ok  return .{}, false;
+    parser:, ok = parse_file(file, file_path);
+    return parser, ok;
+}
+
+parse_file :: (file: string, file_path: string) -> (Parser, bool) {
     parser: Parser;
     init_parser(*parser, file);
-    if !construct_dom      (*parser)  return .{}, false;
-    // if !validate_references(*parser)  return .{}, false;
+    if !construct_dom(*parser)  return .{}, false;
     return parser, true;
 }
 
 
+// ========== Data Bindings ==========
+
+Binding_With_Path :: struct { binding: Any; path: string; }
+
 add_data_binding :: (using parser: *Parser, binding: Any, path: string) -> bool {
-    node := find_node_by_path(parser.root_node, path);
+    node := find_node_by_path(parser, parser.root_node, path);
     return add_data_binding_to_node(node, binding);
 }
 
-add_data_bindings :: (using parser: *Parser, bindings: [] struct { binding: Any; path: string; }) -> bool {
+add_data_bindings :: (using parser: *Parser, bindings: ..Binding_With_Path) -> bool {
     for bindings
         if !add_data_binding(parser, it.binding, it.path)  
             return false;
     return true;
 }
 
-
 process_data_bindings :: (using parser: *Parser) -> bool {
     if !process_node_binding(parser, root_node)  return false;
     return true;
 }
+
+
+// ========== Implementation ==========
+
+#scope_module
 
 process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
     if node.node_type == {
@@ -89,7 +111,9 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
     return false;
 }
 
-
+/*
+    The DOM is constructed in a nice big loop, rather than in some kind of recursive function. 
+*/
 construct_dom :: (using parser: *Parser) -> bool {
     log_unexepected_token :: (token: Token) {
         if token.type == .ERROR {
@@ -195,10 +219,10 @@ construct_dom :: (using parser: *Parser) -> bool {
 
 
 add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
-    if node == null || binding.value_pointer == null  return true;
+    if node == null || binding.type == null  return true;
     
-    if node.binding.value_pointer != null {
-        log("Error, node already has a data binding set...");
+    if node.binding.type != null {
+        log("Error: node already has a data binding set. Node path: %", format_node_path(node));
         return false;
     }
     
@@ -222,22 +246,27 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
         }
     }
     
+    // name_member would conflict with indexing, so index takes precedence
     if is_indexed_array(node.parent) {
-        name_member = null; // don't assign name member if in an indexed array
+        name_member = null;
     }
     
     defer if name_member {
         return Convert.any_to_any(name_member_any, node.name);
     }
     
-    // TODO: think about whether we want to reimplement this functionality
-    // node.binding = deref_any_pointer(node.binding);
+    // TODO: think about whether we want to reimplement pointer dereferencing stuff
+    //       this is maybe something people could do with IO Data bind proc, but maybe that's too type-specific actually
+    
+    // TODO: Need to seriously consider whether or not the making of bindings should be separate from the evaluation.
+    //       Since I removed field references, there's no longer really a need for this to be two separate steps, 
+    //       but I may still add those back in in a more limited form, so... i dunno yet.
     
     // make indirect bindings onto child nodes
     if node.node_type == {
       case .OBJECT;
         if binding.type.type == {
-          case .STRUCT;            
+          case .STRUCT;
             for node.children {
                 member := get_field(xx node.binding.type, it.name);
                 if !member || (member.flags & .CONSTANT)  continue;
@@ -370,7 +399,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 return false;
             }
             for node.children {
-                // TODO: will need to to more work here because of constant struct members
+                // TODO: will need to to more work here to handle constant struct members
                 member := ti_struct.members[it_index];
                 member_any := Any.{ member.type, node.binding.value_pointer + member.offset_in_bytes };
                 if !add_data_binding_to_node(it, member_any)  return false;
@@ -388,6 +417,11 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     for all previous elements, since those are now pointing to the old locations of each element.
                     This may prove to be one of the more fragile aspects of the DOM parser in contrast to the SAX implementation,
                     because this definitely seems like something that a user could break through a problematic callback procedure.
+                    
+                    AND A NEW NOTE FOR ME:
+                    As mentioned in the other comment up top, this complication is now completely unnecessary because we don't 
+                    actually need to separate the making and evaluation of data bindings when we aren't concerned with field references.
+                    But, until I am sure that I won't be adding those back in, we're stuck in limbo.
                 */
                 raw_array    := node.binding.value_pointer.(*Resizable_Array);
                 count_before := raw_array.count;
@@ -481,4 +515,9 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
     
     return Convert.set_value_from_string(value, text, should_copy_strings);
 }
+
+
+#scope_file
+
+#import "File";
 

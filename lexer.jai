@@ -1,3 +1,9 @@
+/*
+    Lexer is entirely #scope_module right now due to the fact that it's probabyl higher up on the list of things that are subject to change.
+    I want to give another go at storing some more token type info for the name/value of nodes, and just see how that plays out now that things are more organized.
+*/
+
+#scope_module
 
 whitespace_chars :: " \t\r\n\0,:";
 
@@ -115,12 +121,8 @@ continues_identifier :: is_alnum;
 try_lex_identifier :: (using lexer: *Lexer) -> string {
     if begins_identifier(file[0]) {
         str: string = .{ 1, *file[0] };
-        advance(lexer);
-        
-        while file && continues_identifier(file[0]) {
-            str.count += 1;
-            advance(lexer);
-        }
+        while continues_identifier(file[0]) && advance(lexer) {}
+        str.count = file.data - str.data;
         return str;
     }
     return "";
@@ -133,6 +135,7 @@ is_legal_identifier :: (str: string) -> bool {
     return true;
 }
 
+// TODO: provide an alternate version that user can enable to get c-style comments instead of, or in addition to # comments
 skip_whitespace_and_comments :: (using lexer: *Lexer) -> bool {
     if file.count == 0 return false;
     while true {

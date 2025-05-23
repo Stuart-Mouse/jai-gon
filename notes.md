@@ -59,6 +59,9 @@ Lexer improvements
             identifier could gain special usage in other cases if disambiguated from string?
         this is actually not working out really, no real point to keeping the token type after lexing
         
+        may give this another try at some point so that we can enforce things like not assigning strings to numbers
+            could also be a lsight speed improvement, since we can just parse numbers when we lex them, and convert to proper type later with Convert.jai
+            could also help in preserving the type of quotation marks used around a string
 
 
 add better logging functions a la tbd module report_parse_error
@@ -68,10 +71,12 @@ need to finish writing some basic test cases?
     
 try to remove some dependencies on Convert.jai and Utils module if possible?
     can't really, now that we use scanner.jai and just moved out set_value_form_string...
+    just owrk on clarifying and organizing dependencies in the future
 
-make sure that all DOM functions which allocate take the parser as first parameter 
-    so that we can make sure pool allocator is set properly
 
+serialize.jai is pretty good right now
+dom.jai is pretty good too, but maybe we should think about making more stuff #scope_module until it's more hardened
+parse.jai is probably the most messy at the moment
 
 ## Directives
 

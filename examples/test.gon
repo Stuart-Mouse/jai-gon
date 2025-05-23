@@ -1,16 +1,41 @@
 
 things {
     "Thing 1" {
-        numbers     [ 1, 2, 3, 4, 5 ],
-        text        "this is a string",
-        flags       [ FIRST, THIRD ],
-        fruit       APPLE,
-    },
+        numbers     [ 1, 2, 3, 4, 5 ]
+        text        "this is a string"
+        flags       [ FIRST, THIRD ]
+        fruit       APPLE
+    }
     "Thing 2" {
-        numbers     [ 5, 4, 3, 2, 1 ],
-        fraction    53.53,
-        text        "this is \"another\" string",
-        fruit       BANANA,
-    },
+        numbers     [ 5, 4, 3, 2, 1 ]
+        text        "this is another string"
+        position    [ 420, 69, 58008 ]
+        fruit       BANANA
+    }
 }
 
+
+foo {
+    some_strings   [ "some", "strings", "in", "an", "array"  ]
+    bar {
+        other_things {
+            "Other Thing 1" {
+                numbers     [ 1, 2, 3, 4, 5 ]
+                text        "do you like \"strings\" in your strings?"
+                flags       [ SECOND ]
+                fruit       PEAR
+            }
+            "Other Thing 2" {
+                numbers     [ 1, 2, 3, 4, 5 ]
+                text        "yet another string, how tiresome..."
+                flags       [ FIRST, THIRD, SECOND ]
+                fruit       STRAWBERRY
+                position {
+                    x   420
+                    y   69
+                    z   58008
+                }
+            }
+        }
+    }
+}

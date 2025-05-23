@@ -1,40 +1,42 @@
 
-// serializes to the parser's internal string builder
-// user will still need to write the constructed string out to a file
-serialize :: (using parser: *Parser) -> bool {
-    if parser.root_node == null  
-        return false;
+serialize_to_string :: (using parser: *Parser) -> (result: string, ok: bool) {
+    builder: String_Builder;
+    if !serialize_to_builder(parser, *builder) {
+        free_buffers(*builder);
+        return "", false;
+    }
+    return builder_to_string(*builder), true;
+}
+
+serialize_to_file :: (using parser: *Parser, file_path: string) -> bool {
+    builder: String_Builder;
+    if !serialize_to_builder(parser, *builder) {
+        free_buffers(*builder);
+        return "", false;
+    }
+    return write_entire_file(file_path, builder_to_string(*builder));
+}
+
+serialize_to_builder :: (using parser: *Parser, builder: *String_Builder) -> bool {
+    if parser.root_node == null  return false;
     
     for root_node.children 
-        if !serialize_node(parser, it)
+        if !serialize_node(builder, it)
             return false;
     
     return true;
 }
 
-serialize_to_string :: (using parser: *Parser) -> (result: string, ok: bool) {
-    if !serialize(parser)  return "", false;
-    return builder_to_string(*parser.builder), true;
-}
 
-serialize_to_file :: (using parser: *Parser, file_path: string) -> bool {
-    if !serialize(parser)  return false;
-    write_entire_file(file_path, builder_to_string(*parser.builder));
-    return true;
-}
+#scope_module
 
-serializer_insert_binding :: (parser: *Parser, path: string, binding: Any, prepend: bool = false) {
-    insert_data_node(parser.root_node, path, binding, prepend);
-}
+/*
+    Most of the serialization logic is all #scope_module because it's still somewhat subject to change over time, 
+    but there's also little enough code here, I think, that it's relatively understandable if you feel the need to modify it.
+*/
 
-
-// INTERNAL PROCEDURES
-
-// We could convert this to an iterative process rather than a recursive one relatively easily,
-//      because we don't currently have any need to use the stack to hold state.
-// May be worth considering later once functionality is more complete.
-serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_if_empty := false) -> bool {
-    if parser == null || node == null  return false;
+serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line := false, skip_if_empty := false) -> bool {
+    if node == null  return false;
     
     io_data := get_io_data(node.binding.type);
     
@@ -53,20 +55,20 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_
     }
     
     if (same_line || in_array) && !is_first_child 
-        append(*builder, ",");
+        append(builder, ",");
     
     if same_line {
-        append(*builder, " ");
+        append(builder, " ");
     } else {
-        append(*builder, "\n");
-        for 0..indent-1  append(*builder, INDENTATION_STRING);
+        append(builder, "\n");
+        for 0..indent-1  append(builder, INDENTATION_STRING);
     }
     
     if !in_array {
         if is_legal_identifier(node.name) 
-            then append(*builder, node.name);
-            else append_gon_string(*builder, node.name);
-        append(*builder, " ");
+            then append(builder, node.name);
+            else append_gon_string(builder, node.name);
+        append(builder, " ");
     }
     
     if node.node_type == {
@@ -83,7 +85,7 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_
                       || element_type.type == .ENUM; 
         }
         
-        append(*builder, ifx is_array then "[" else "{");
+        append(builder, ifx is_array then "[" else "{");
         
         // special case for serializing enum flags
         // we ignore child nodes and just write the array of flags values directly
@@ -104,7 +106,7 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_
                     break;
                 }
                 
-                append(*builder, name);
+                append(builder, name);
                 return true;
             }
 
@@ -123,42 +125,39 @@ serialize_node :: (using parser: *Parser, node: *Node, same_line := false, skip_
 
                 flags_printed |= matching;
 
-                if first  append(*builder, " ");
-                else      append(*builder, ", ");
-                append(*builder, ti_enum.names[it_index]);
+                if first  append(builder, " ");
+                else      append(builder, ", ");
+                append(builder, ti_enum.names[it_index]);
                 first = false;
             }
 
             unmatched := flags_total & ~flags_printed;
             if unmatched {
-                if !first  append(*builder, ", 0x");
+                if !first  append(builder, ", 0x");
                 format := FormatInt.{base=16};
-                print_u64_base_n(*builder, unmatched, format);
+                print_u64_base_n(builder, unmatched, format);
             }
         } else {
-            // recurse for children
-            indent += 1;
             for child: node.children 
-                if !serialize_node(parser, child, same_line, should_skip_empty_elements)  
+                if !serialize_node(builder, child, indent + 1, same_line, should_skip_empty_elements)  
                     then return false;
-            indent -= 1;
         }
         
         if same_line {
-            append(*builder, " ");
+            append(builder, " ");
         } else {
-            append(*builder, "\n");
-            for 0..indent-1  append(*builder, INDENTATION_STRING);
+            append(builder, "\n");
+            for 0..indent-1  append(builder, INDENTATION_STRING);
         }
         
-        append(*builder, ifx is_array then "]" else "}");
+        append(builder, ifx is_array then "]" else "}");
         
       case .FIELD;
         // TODO: should probably switch on node.value.type
         if node.binding.type {
-            append_field_value(*builder, node.binding);
+            append_field_value(builder, node.binding);
         } else if node.value {
-            append_field_value(*builder, node.value);
+            append_field_value(builder, node.value);
         } else {
             // TODO: maybe we can pass void as the value as a special case ?
             //       but this will not work as we still need the value type...
