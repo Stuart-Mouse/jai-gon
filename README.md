@@ -40,22 +40,22 @@ The same is true of arrays, and the parser can allocate from context.allocator a
 ### Supported Data Bindings
 
 Any of the following data types can be bound to a GON field:
-    - strings
-    - all integer types
-    - all float types
-    - enum types which are NOT enum_flags
-    - structs which define a custom parsing procedure in IO Data
-    - arrays with element type `u8` (so that they can be treated like strings)
+- strings
+- all integer types
+- all float types
+- enum types which are NOT enum_flags
+- structs which define a custom parsing procedure in IO Data
+- arrays with element type `u8` (so that they can be treated like strings)
 
 Any of the following data types can be bound to a GON object:
-    - all structs
-    - arrays of structs which define a name member in IO Data
-    - integer- or enum-indexed arrays 
+- all structs
+- arrays of structs which define a name member in IO Data
+- integer- or enum-indexed arrays 
 
 Any of the following data types can be bound to a GON array:
-    - all structs
-    - all arrays
-    - enums_flags
+- all structs
+- all arrays
+- enums_flags
     
 For examples of how data bindings are used in practice, run the included 'examples.jai'.
 This file demonstrates both parsing and serialization with data bindings.
