@@ -1,181 +1,153 @@
+/*
+    Lexer is entirely #scope_module right now due to the fact that it's probabyl higher up on the list of things that are subject to change.
+    I want to give another go at storing some more token type info for the name/value of nodes, and just see how that plays out now that things are more organized.
+*/
 
-whitespace_chars :: " \t\r\n\0";
-reserved_chars   :: "~!@#$%^&:*{}[]()\"";
-whitespace_and_reserved_chars :: #run join(whitespace_chars, reserved_chars);
+#scope_module
+
+whitespace_chars :: " \t\r\n\0,:";
 
 Token :: struct {
     type:       Token_Type;
     text:       string;
-    location:   Source_Location;
+    location:   Source_Code_Location;
 }
 
-Token_Type :: enum u8 {
-    EOF;
-    ERROR;
+Token_Type :: enum #specified {
+    ERROR :: -1;
+    EOF   ::  0;
     
-    STRING;
+    OBJECT_BEGIN :: #char "{";
+    OBJECT_END   :: #char "}";
+    ARRAY_BEGIN  :: #char "[";
+    ARRAY_END    :: #char "]";
     
-    OBJECT_BEGIN;
-    OBJECT_END;
-    ARRAY_BEGIN;
-    ARRAY_END;
-    
-    REF_INDEX;
-    REF_POINTER;
-    REF_VALUE;
+    IDENTIFIER :: 255 + 1;
+    STRING     :: 255 + 2;
+    NUMBER     :: 255 + 3;
 }
 
-Source_Location :: struct {
-    line, char: int;
+Lexer :: struct {
+    using #as scanner:  Scanner;
+    next_token:  Token;
 }
 
-Tokenizer :: struct {
-    file:               string;
-    next_token:         Token;
-    cursor_location:    Source_Location;
+init_lexer :: (lexer: *Lexer, file: string, file_path := "") {
+    init_scanner(lexer, file, file_path);
+    get_token(lexer);
 }
 
-init_tokenizer :: (using t: *Tokenizer) {
-    cursor_location = .{ line = 1, char = 1 };
-    get_token(t);
-}
-
-get_token_or_return :: (using t: *Tokenizer, code: Code) -> Token #expand {
-    token := get_token(t);
+get_token_or_return :: (using lexer: *Lexer, code: Code) -> Token #expand {
+    token := get_token(lexer);
     if token.type == .ERROR  `return #insert code;
     return token;
 }
 
-get_token :: inline (using t: *Tokenizer) -> Token {
+get_token :: inline (using lexer: *Lexer) -> Token {
     if next_token.type == .ERROR {
-        log("TOKENIZER ERROR: % (line %, char %)\n", next_token.text, next_token.location.line, next_token.location.char);
         return next_token;
     }
     
     current_token := next_token;
-    next_token = lex_next_token(t);
+    next_token = lex_next_token(lexer);
     return current_token;
 }
 
-peek_token :: inline (using t: *Tokenizer) -> Token {
+peek_token :: inline (using t: *Lexer) -> Token {
     return next_token;
 }
 
-// consumes token if it was expected type, else it was just peeked
-expect_token_type :: (using t: *Tokenizer, type: Token_Type) -> bool {
-    token := peek_token(t);
+// only consumes token if it was the expected type
+expect_token_type :: (using lexer: *Lexer, type: Token_Type) -> bool {
+    token := peek_token(lexer);
     if token.type == type {
-        get_token(t);
+        get_token(lexer);
         return true;
     }
     return false;
 }
 
+make_error_token :: (message: string = "", location: Source_Code_Location) -> Token { 
+    return .{ .ERROR, message, location }; 
+}
+
 // mutates the passed string, advancing it to the position after the returned token
-lex_next_token :: (using t: *Tokenizer) -> Token {
-    if !skip_whitespace_and_comments(t)  return .{ type = .EOF };
-    
-    location := cursor_location;
-    make_error_token :: (error_string: string = "") -> Token #expand { 
-        return .{ type = .ERROR, location = location, text = error_string }; 
-    }
+lex_next_token :: (using lexer: *Lexer) -> Token {
+    if !skip_whitespace_and_comments(lexer)  return .{ type = .EOF };
+    token_location := lexer.location;
     
     // single character tokens
     if file[0] == {
-      case #char "{";  advance(t);  return .{ .OBJECT_BEGIN, "{", location };
-      case #char "}";  advance(t);  return .{ .OBJECT_END,   "}", location };
-      case #char "[";  advance(t);  return .{ .ARRAY_BEGIN,  "[", location };
-      case #char "]";  advance(t);  return .{ .ARRAY_END,    "]", location };
-      case #char "&";  advance(t);  return .{ .REF_INDEX,    "&", location };
-      case #char "*";  advance(t);  return .{ .REF_POINTER,  "*", location };
-      case #char "$";  advance(t);  return .{ .REF_VALUE,    "$", location };
+      case "{";  advance(lexer);  return .{ .OBJECT_BEGIN, "{", token_location };
+      case "}";  advance(lexer);  return .{ .OBJECT_END,   "}", token_location };
+      case "[";  advance(lexer);  return .{ .ARRAY_BEGIN,  "[", token_location };
+      case "]";  advance(lexer);  return .{ .ARRAY_END,    "]", token_location };
     }
     
-    // some helper procs
-    is_numeric :: inline (char: u8) -> bool {
-        return char >= #char "0" && char <= #char "9";
-    }
-    is_alpha :: inline (char: u8) -> bool {
-        return (char >= #char "a" && char <= #char "z") 
-            || (char >= #char "A" && char <= #char "Z");
-    }
+    token_text := try_lex_number(lexer);
+    if token_text  return .{ .NUMBER, token_text, token_location };
     
-    // string
-    if file[0] == #char "\"" || file[0] == #char "'" || file[0] == #char "`" { 
+    token_text = try_lex_identifier(lexer);
+    if token_text  return .{ .IDENTIFIER, token_text, token_location };
+    
+    // parse string
+    // NOTE: only supporting regular (double) quotes at the moment due to the fact that we don't preserve info about what type of quotes parsed in file.
+    if file[0] == "\"" { 
         quote_char := file[0];
         
-        if !advance(t)  return make_error_token("Unexpected EOF while parsing string.");
-        string_value := string.{ 0, file.data };
+        if !advance(lexer)  return make_error_token("Unexpected EOF while parsing string", token_location);
+        token_text := string.{ 0, file.data };
         
         while file[0] != quote_char {
-            // TODO: handle escape sequences more properly
-            adv := 1 + (file[0] == #char "\\").(int); 
-            string_value.count += adv;
-            if !advance(t, adv)  return make_error_token("Unexpected EOF while parsing string.");
-        }
-        advance(t);
-        
-        return .{ .STRING, string_value, location };
-    }
-    
-    // unquoted string
-    if is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-        string_value := string.{ 0, file.data };
-        
-        while is_alpha(file[0]) || is_numeric(file[0]) || file[0] == #char "-" || file[0] == #char "_" || file[0] == #char "." {
-            string_value.count += 1;
-            if !advance(t)  break;
+            if file[0] == "\\" {
+                _, ok := parse_escape_sequence(lexer);
+                if !ok  return make_error_token("Invalid escape sequence encountered while parsing string", token_location);
+            } else {
+                if !advance(lexer)  return make_error_token("Unexpected EOF while parsing string", token_location);
+            }
         }
         
-        return .{ .STRING, string_value, location };
+        token_text.count = lexer.file.data - token_text.data;
+        advance(lexer);
+        return .{ .STRING, token_text, token_location };
     }
     
-    return make_error_token("Unexpected character encountered.");
+    return make_error_token("Unexpected character encountered", token_location);
 }
 
+begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char == "_"; }
+continues_identifier :: is_alnum;
 
-// cycles between skipping whitespace and comments until next character is neither
-skip_whitespace_and_comments :: (using t: *Tokenizer) -> bool {
+try_lex_identifier :: (using lexer: *Lexer) -> string {
+    if begins_identifier(file[0]) {
+        str: string = .{ 1, *file[0] };
+        while continues_identifier(file[0]) && advance(lexer) {}
+        str.count = file.data - str.data;
+        return str;
+    }
+    return "";
+}
+
+is_legal_identifier :: (str: string) -> bool {
+    if !str return false;
+    if !begins_identifier(str[0])  return false;
+    for str  if !continues_identifier(it)  return false;
+    return true;
+}
+
+// TODO: provide an alternate version that user can enable to get c-style comments instead of, or in addition to # comments
+skip_whitespace_and_comments :: (using lexer: *Lexer) -> bool {
     if file.count == 0 return false;
     while true {
-        while is_whitespace(file[0]) {
-            if !advance(t) return false;
+        while is_any(file[0], whitespace_chars) {
+            if !advance(lexer) return false;
         }
-        if file[0] == #char "#" {
-            while file[0] != #char "\n" {
-                if !advance(t) return false;
+        if file[0] == "#" {
+            while file[0] != "\n" {
+                if !advance(lexer) return false;
             }
         }
         else return true;
     }
     return true;
-}
-
-is_whitespace :: inline (char: u8) -> bool {
-  return char == #char " "
-      || char == #char ","
-      || char == #char "\t"
-      || char == #char "\r"
-      || char == #char "\n";
-}
-
-
-#scope_module
-
-advance :: inline (using t: *Tokenizer, amount := 1) -> bool {
-    _amount := min(amount, file.count);
-    
-    for 0.._amount-1 {
-        if file[it] == #char "\n" {
-            cursor_location.line += 1;
-            cursor_location.char  = 1;
-        } else {
-            cursor_location.char += 1;
-        }
-    }
-    
-    file.data  += _amount;
-    file.count -= _amount;
-    
-    return file.count > 0; // return false when we hit EOF
 }

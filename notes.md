@@ -1,15 +1,12 @@
 
-
 ## TODO
 
-implement flag for not setting name member
+hash map support
+    may be problematic that we separate placement and evaluation of bindings
+    can we iterate children twice, inserting all elements and then doing bindings?
+tagged_union support
+    needed in convert.jai as well, probably do it there first 
 
-maybe implement built-in hash map support because why not?
-
-expression evaluator using lead sheets, with special syntax for field refs
-    cannot pre type check, just due to nature of the beast
-
-refactor DOM to use flat pool allocator for nodes
 
 ## Better User Extension & Setting Allocators
 
@@ -20,7 +17,7 @@ For example, if we wanted to make a data binding to a gon object, but we needed 
         in previous version, we had to just add a callback that would run for all nodes, 
         checking the parent binding's type and then manually setting the data binding on the node
         with the new method we would only run the callback on the single data binding, since we are just wrapping the base any with the extra data/procedures it needs
-    
+
 // structure for extending parsing of a GON object or array
 // if we get one of these bound to a field, that's wrong
 Container :: struct {
@@ -37,274 +34,182 @@ maybe this would not be all that bad to have as a feature even if it only helped
 since then we could do something like just setting an object to allocate all elements of a specifc type in a pool allocator
 but simply having a set_allocator_for_type proc would probabyl be more useful, or something like io_data structures
 
-## Field References
-
-`&` gets then index of a node within it's parent object or array
-`*` gets a pointer to a node's data binding
-`$` gets the value of a node (by simply pointing the node at the same underlying string value) 
-
-value refs are resolved differently than index or pointer refs
-    as we are validating node references, we actually get rid of all value refs by simply cloning the nodes they refer to, recursively
-    so a value ref actually involves copying a section of the dom and pasting it where requested
 
 
 
-## Integrating Scripts
+## Cleanup and Rewrite
 
-While I would love to use gon for doing things like defining Enemy_Templates in my mario ripoff engine,
-    it's currently not feasible to do so because I need to be able to compute certain vlaues based of off other values.
+Temporarily remove field references to reconsider how these can be implemented better, more simply.
+    Should have some means of serializing or inserting as nodes procedurally.
+    Maybe restrict to them working purely lexically.
 
-I could implement some very basic expression parsing and evaluation into GON directly, 
-    but since I've been on a kick of offering optional integration between my various modules,
-    it seems sensible to just use Lead_Sheets for the job.
-    
-In order to make this fully optional and unobtrusive though,
-    I need to have some basic facility for tokenizer callbacks.
-    This is an idea I had before, but basically it would just allow the user to use a single character token (e.g. `!`)
-    that would take away control flow from the GON tokenizer and hand it over to the user.
-    Once the user returns control, they should also return an Any with the value for the node.
-    This Any could be of a special type that the user can recognize and intercept later when resolving data bindings.
-    
-    Now presumably we would also want to be able to get around the dom nodes when evaluating a script
-    for example, we would want to be able to resolve field refs that are embedded inside a script
-    which in turn would require some special parsing and typechecking on the lead sheets' side
-    So in order to make all this work, we need to have a very solid interface for both the GON DOM and Lead Sheets AST.
-    
-    
-### Tokenizing
+For user extension, will introduce something like directives which should be relatively versatile. 
+    may be able to implement some level of control over allocators through directives
 
-Whether we hand control back and forth between tokenizers or not will depend on a few factors.
-1. What is the desired syntax for the embedded expressions/scripts?
-2. How will we go about evaluating the expressions?
-3. How will expressions refer back to DOM nodes?
+We are very close to being able to completely remove node flags, but I didnt feel like refactoring the sameline stuff for serialization just yet
+    and I'm also somewhat hesitant about removing .ARRAY_INDEXED and .ARRAY_AS_OBJECT
+    maybe we will want to add these back in behind some interface proc so that we can change things around in future if needed
+    did go through with removing these, will see how it plays out long term
 
-
-### Desired Syntax
-
-Ideally the syntax for embedded expressions would be as simple as just enclosing the expression in parentheses.
-```
-gladiator {
-    health 5
-    stamina 7 
-    magic_stamina (stamina * 2)
-}
-```
-Very stupid example, but it gets the point across.
-Basically, since parentheses are the only common structural tokens that I have not yet used, they would make a good fit for expressions
-
-### Random Implementation Notes
-
-I think we will need a better interface in lead sheets for doing only expressions after all
-unless we just desugar all expressions into assignment statements by pulling the data binding from corresponding node
-
-Combining the GON format with lead sheets is basically creating a whole little scripting language at this point
-GON was supposed to be just simple data markup
-and lead sheets were supposed to be just simple expressions, with the only data types being externally defined
-but putting the tow together, I almost have a very simple javascript ripoff
-now, the benefit is still that I can lean heavily on the typeinfo system in Jai and using actual Jai procedures
-but still, there's definitely more complication here than is ideal
-
-so on another note, I think I want to tak time at some point to rewrite or just generally improve the old sax style jai gon parser
-because perhaps someone else will just appreciate the simplicity of that version more...
-    I think it basically just needed a better interface and a better tokenizer to be MVP?
-
-I think I need to go work on other things and then come back to this. 
-both the gon parser and lead sheets are not developed enough at this point to start nailing down aspects of cross-functionality
-
-lead sheets could already sort of do the job of setting up data in the way that gon does 
-by just binding all the top level data bindings as variables, then using nested struct literals
-    but the syntax is not quite as nice for doing simple data definition
-    and we don't get the non-linear evaluation of field refs
-        but is that such a bad thing to lose?
-            yeah, bc e.g. tiles in mario game that need to reference one another circularly
-
-
-
-
-integrating with lead sheets
-
-will require being able to insert statements into script manually, without parsing directly from one source file
-should jsu tbe able to create the assignment expression node manually, then parse_expression on the expression from gon file
-then put the newly created statement into the main root block
-
-```
-parse_source_file :: (script: *Script, source: string) -> bool {
-    if !(script.flags & .INITIALIZED)  return false;
-    
-    success: bool;
-    defer if !success  free_script(script);
-    
-    script.ast_root = alloc_node(script, Node_Block);
-    script.current_parent_node = script.ast_root;
-    
-    // Split here, this is where we will manually add nodes to ast root block
-    // so basically above, we will jus tinit and then alloc root node
-    // perhaps we should just move the allocation of the root node to the init proc anyhow...
-    
-    if !typecheck_script(script) {
-        log("Error: failed to typecheck script.\n");
-        return false;
-    }
-    
-    success = true;
-    return true;
-}
-```
-
-```
-assignment := LS.alloc_node(script, Node_Operation)
-assignment.name = "=";
-assignment.operator_type = .ASSIGNMENT;
-assignmnet.flags |= .MUST_BE_STATEMENT_ROOT;
-assignment.left = gon_node.data_binding;
-
-script.lexer.file = gon_node.value.text;
-LS.init_lexer(&script.lexer);
-assignment.right = parse_expression(script, 0);
-
-// TODO: get last statement node in ast root
-//       probably keep track of this on GON side, since we don't store that in LS script explicitly
-last_ast_node.next = assignment;
-```
-
-step 1 may be just to make the make the expressions work
-    no ability to reference other fields yet
-    no order of evaluation concerns
-step 2 is implement the references by hijacking identifier resolution and inserting declarations as needed
-step 3 is fix the evaluation order by tracking dependencies between nodes
-
-
-```
-resolve_gon_path_identifier :: (path: string, dependent: *DOM_Node) -> (data_binding: Any, ok: boolb) {
-    // if there is no data binding, we should probably still be able to use the value on the node as whatever it is textually.
-    // so we will try to parse it as a number/string.
-    // in theory we could allow using objects and arrays as well if they can have a type hint provided by lead sheet, but that it probably a really messy idea...
-    
-    gon_node := find_node_by_path(path);
-    if !gon_node {
-        // log error
-        return Any.{}, false;
-    }
-    
-    // not sure if we want to do this here or not? 
-    // but where else... need data binding as resolution to identifier, not dom node.
-    // but maybe we just put the dom nodes as resolved type of identifier for now, and then fix that in typecheck pass?
-    // not really sure on this one...
-    if gon_node == dependent {
-        // log error
-        return Any.{}, false;
-    }
-    
-    if gon_node.data_binding.value_pointer != null  
-        return gon_node.data_binding, true;
-    
-    if gon_node.type 
-}
-
-```
-
-
-```
-for n1: script.ast_root.statements {
-    for n2: script.ast_root.statements {
-        if 
-    }
-    
-}
-
-```
-
-
-We have a problem in trying to refactor the node reference validation from an iterative approach to a recursive one:
-    When trying to find a referenced node by its path, we may not be able to find a node on the first pass because it does not *yet* exist, but will exist after a later object reference is evlauated
-    since object refs can add new nodes onto the DOM by copying from one location to another.
-    
-So at least for now, it may not really be possible to change honode refs are evaluated.
-but maybe this is okay, and we can just evaluate all ref nodes before worrying about code expressions
-that way, we can be sure that the DOM is stable and will have no further modifications by the time that the code expressions are evaluated
-
-NOTE: it would be totally possible to do the fully recursive validation approach if it weren't for the object-type value refs
-    maybe we should consider just ditching value-refs for objects? but that feels like a weird hole...
-
-standard node references are resolved iteratively, since new nodes may still be added to the DOM as references are resolved.
-However, by the time we start trying to construct a script for the expressions on GON nodes, the DOM is stable and will not have new nodes added
-so we are free to resolve the references in code expressions more straightforwardly 
-
-
-THINKING
-
-are we really sure that value refs are properly evaluated in an order-independent manner? 
-    this is really pretty important, since it would be nonsensical to have the meaning of gon change based on the order of objects
-    I think that this is the case, because we dont' allow a value ref to a value ref to be resolved
-    
-
-what happens if we have a value ref to a code node?
-we can't evaluate that data binding until after the code for that node is evaluated...
-this is really not nice because this means we can just cleanly eval the normal data bindings and then run the script after the fact.
-and we also can't run the script before we do the data bindings because the normal nodes won't have had their values assigned to the data bindings yet...
-
-maybe we could run the script first, but then early evaluate any bindings that are referenced in code
-so these nodes would need to be flagged as having already had their data bindings evaluated, so that we don't repeat that when we walk the tree
-
-OR maybe we really just don't want to even walk the tree to eval bindings
-maybe we should just create a linear array of dom nodes to evaluate and reorder those based on dependencies
-
-
-
-get all statically known nodes out of the way 
-
-then we only have to worry about ordering value refs and code nodes
-
-still do iterative thing for solving refs, since these can modify dom
-
-then we can worry about finding dependency chain for each of value refs and code nodes
-no dep chain means front of the line
-    make problem smaller this way
-    
-then finally, order last nodes, some sort of simple bubble sort deal
-
-value refs on their own dont have an evaluation order problem, only value refs ot code nodes
-and this is really because of the code nodes, not the value refs
-but in any case we cannot eval the refs' data bindings until after the ref'd code evaluates
-
-
-
-then there's the identifier issue
-so I think what we want to do here, even though its slightly a hack, is to just substitute the identifier node for an ANY literal.
-The Any literal is already a bit of a hack, but it is super useful for this kind of manual node insertion stuff
-and it makes the possibility of doing more of an eval rather than exec thing more plausible
-    which may be desirable for the gon use case, since we just exec each statement once
-
-
-
-New syntax for LSON:
-```
-// normal c-style comments
-
-// field name and value must now be separated by colon
-// fields must be separated by commas (no penalty for extraneous comma in objects)
-things: {
-    `Thing 1`: {
-        number:     100 + 5,        // expressions don't need to be enclosed in parentheses
-        friend:     &`Thing 2`,     // 
-    },
-    `Thing 2`: {
-        integers:   [ 1, 2, $'/things/Thing 1/'.number, 4, 5 - 1 ],
-        color:      RED,
-        text:       "this is a string",
-    }
-}
-```
-
-Not yet sure if I want to enforce that string-like identifiers use backticks or can also use normal quotation marks
-reason being that we want to use identifiers as field paths in value expressions, since otherwise there's ambiguity over what's just a string and whats a field name
-we could just makethe ref (`$`, `&`, and `*`) operators act on strings and return a node
-    this could be better if we still need to solve file iteratively
-        since we don't need to re-typecheck each time we exec if we evaluate a field path dynamically as an operator anyhow.
+Lexer improvements
+    I think it would be beneficial to lex numbers, identifiers, and strings as distinct tokens 
+    then maybe we just store the 'name' and 'value' tokens on each node, so that we preserve info about the token type into the data binding stage
+        number can bind to int/float/enum
+        string can be as name of field or value for string
+        identifier can be used as name of field or value for enum
+            identifier could gain special usage in other cases if disambiguated from string?
+        this is actually not working out really, no real point to keeping the token type after lexing
         
-even if we use normal identifiers and subscripting to navigate the dom in value expressions, 
-    we still have the issue of getting from to a parent node from a child node
-    we could implement this with a unary operator as well, but what syntax to use? maybe prefix `^` with really high prec
+        may give this another try at some point so that we can enforce things like not assigning strings to numbers
+            could also be a lsight speed improvement, since we can just parse numbers when we lex them, and convert to proper type later with Convert.jai
+            could also help in preserving the type of quotation marks used around a string
+
+
+need to finish writing some basic test cases?
+    at least need to manually test stuff again before publishing
+    
+try to remove some dependencies on Convert.jai and Utils module if possible?
+    can't really, now that we use scanner.jai and just moved out set_value_form_string...
+    just work on clarifying and organizing dependencies in the future
+
+
+
+## How much to simplify?
+
+If we remove the distinction between the steps of putting data bindings on the nodes and actually evalutating those data bindings,
+    then we may get more flexibility in how we mkae/evaluate bindings
+    could create a module which does this generically enough that it can be applied to various DOM structures, e.g. JSON, XML, etc.
+        a sort of 'dom2data', if you will
+    but, again, this would require completely cutting off the possibility of doing field references
+        unless we can find some way to split the difference and maybe augment the the DOM nodes for the target parser and attach the additional 'binding' member
+            this would be an interesting test case, but I'm not sure that Jai quite has a means to poke a data member into a struct from another module
+            we could also just store the node->data binding relationship in a separate array, then iterate over this array upon evaluation.
+            the propblem with that thouhg, is how to maintain a sort of hierarchical control now that the evaluation is decoupled form the DOM itself....
+        
+
+Another option, not really for GON, but for LSD with regard to field references would be to export the binding's names to the script as variables and just allow the user to access the bindings form teh text of the script directly.
+this put a little more burden on the script context o provide all the right bindings, but that's pretty much already the direction that LSD is going, so no biggie i think
+
+
+
+## Directives
+
+`#identifier(...)`
+
+Capture everything inside the parenthesis, considers matching inner pairs of parens ?
+    give the user the idrective parameters as one big string, or as an array of tokens?
+    doing tokens is probably the best option since once can always just pass a string to the directive
+
+What can directives do?
+    produce a typed value? 
+    modify previous/parent field?
+    modify parser state?
+    
     
     
 
+
+
+
+
+
+# Why use a DOM instead of SAX-style parsing?
+
+This question has been a constant in my mind while developing, porting, refactoring, and completely rewriting (several times) various GON parsers in various languages.
+(I've taken this thing from C++ to C#, to C, to Jai, to Odin, and back to Jai, with complete overhauls at various stages.)
+Well it comes down to basically just a couple reasons, but before I expound on those I'll explain the draw of using a SAX parser in the first place, in case you're not familiar with the concept.
+
+## The Appeal of SAX    
+
+(Thanks a lot tsoding, for sending me on this mad quest.)
+
+The term SAX refers to [Simple API for XML](https://en.wikipedia.org/wiki/Simple_API_for_XML), an XML parser based around using a bunch of event callbacks to tell the parser what to actaully *do* as it reads through a file.
+It's honestly sort of like just having a tokenizer, but the control is really inverted because instead of asking the tokenizer for tokens, the parser ask you what to do when it encounters all the file's *stuff*.
+(I'm explaining this very poorly, but I linked the Wikipedia article, so you can actually just read that if you care. You have agency and such.)
+
+I never actually used SAX myself, but I got the vague idea of what it's going for and thought that it would be just a lovely way to rewrite my GON parser (at this time, in C).
+See, while I was writing my C implementation, I had originally gotten some big idea about how I would 
+
+
+## Why Not
+
+1. decoupling the GON document's structure from the data's internal structure
+    
+    In the SAX parser, evaluating paths to specific fields is not really as straightforward as one might think. 
+    You have to do this weird sort of thing of tracking how far you currently are down each path as you step into and out of objects and arrays.
+    And then when you get to the end of a given path, you've got to mark that path as complete in some way.
+    It's not like it's particularly difficult logic to deal with, it's just kind of weird and finnicky.
+    
+    
+
+2. symmetry between parsing and serialization
+    
+    Parsing/serialization is essentially a process of mapping one recusive structure onto another recursive structure.
+    And when when performing this kind of a mapping procedurally, we have to choose which structure's navigation will control the flow of the program.
+    This is very important to keep in mind because this brute fact creates a necessary asymmetry between parsing and serialization.
+    
+    For a more simple example of what I'm trying to get at here, consider iterating over two parallel arrays, where we want to map elements from one array onto the other:
+    So we have our arrays:
+    ```
+    foos: [8] Foo;
+    bars: [8] Bar;
+    
+    for foos  bars[it_index] = foo_to_bar(it);
+    ```
+    Great, easy peasy. But notice that we could also have written it differently, making the iteration of `bars` 'authoritative'.
+    ```
+    for *bars  it.* = foo_to_bar(foos[it_index]);
+    ```
+    Or, more neutrally:
+    ```
+    for 0..7  bars[it] = foo_to_bar(foos[it]);
+    ```
+    With two arrays of equal length, we have a 'one-to-one onto' mapping, which gives us lots of options about how to express that mapping procedurally in code.
+    It doesn't matter which 
+    
+    
+    
+    Because SAX-stye parsing is highly linear, whatever wiggle room that we have when parsing
+    Although SAX-style parsing is highly linear, perhaps you can see how we have a little bit of wiggle room and ability to 
+    
+    
+    
+    Serializing data structures directly into GON is very simple, and could even be implemented just thorugh some custom strucut formatting print rules.
+    However, serializing to specific field paths is quite complicated, since we now need to keep track of where we are in the output file, and constantly check if other data bindings want to poke something in at the current path.
+    
+    Maybe this seems like a weird edge case or non-issue to you, but consider the following GON file:
+    ```
+    
+    
+    ```
+    
+    
+3. simplicity (in some dimension)
+
+    For parsing, my old SAX implementation was certainly less code than even my current DOM implementation.
+    
+    The DOM implementation gets a big simplicity boost with the addition of the flat pool allocator.
+    Not having to really think about freeing node anymore just lifts off 90% of the additional mental burden that the DOM implementation would otherwise have over the SAX-style parser.
+    
+    
+4. (bonus reason, because it's not really applicable anymore) extra features
+
+    The main reason I went back to using a DOM in the first place was because I wanted to be able to evaluate references between fields, and this is not really possible in SAX-style parsing.
+    By references, I mean being able to use some special syntax and a field path string to get the value, index, or a pointer to another field in the file.
+    This may seem somewhat trivial, and for a DOM parser, it is. But not so for SAX.
+    Implementing forward-references is not to hard with SAX-style parsing, 
+        since you can just make a note to update the value of the referee when the referent is found.
+    But because the parser only goes forwards, there's no way to make reference to fields found earlier in the file.
+    
+    Now, I may have gone a bit *too* ham on field references when I first implemented them in GON, particularly with value references.
+    In addition to value references on individual fields, I implemented value references on objects, 
+        which involved cloning entire subtrees on the DOM and pasting them into other places.
+    And this means that the process of resolving field references becomes an iterative solver, 
+        since we can end up in situations where we have a reference to with some path which does not yet exist, 
+        but will exist after we clone some child nodes onto a different parent.
+    While all of this worked, and the feature was pretty cool, it added too much additinal code (and complexity) to the module, 
+        which I do not feel was justified by the marginal usefulness of the feature.
+    
+    And so, here we are now. I have ripped out all of that and more, and the parser is back in a more manageable (and readable) state.
+        The focus now is to take the opportunity afforded by that newfound simplicity to 
+    
