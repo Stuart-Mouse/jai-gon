@@ -75,7 +75,7 @@ find_node_by_path :: (parser: *Parser, node: *Node, path: string) -> *Node, int 
     if !_path  return node, get_lexical_index(node);
     search_from_node := node;
     
-    is_absolute_path := _path[0] == #char "/";
+    is_absolute_path := _path[0] == "/";
     if is_absolute_path {
         advance(*_path);
         search_from_node = parser.root_node;
@@ -385,66 +385,3 @@ is_indexed_array :: (node: *Node) -> bool {
     return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
 }
 
-#scope_file
-
-/*
-    # Why use a DOM instead of SAX-style parsing?
-    
-    This question has been a constant in my mind while developing, porting, refactoring, and completely rewriting (several times) various GON parsers in various languages.
-    (I've taken this thing from C++ to C#, to C, to Jai, to Odin, and back to Jai, with complete overhauls at various stages.)
-    Well it comes down to basically just a couple reasons, but before I expound on those I'll explain the draw of using a SAX parser in the first place, in case you're not familiar with the concept.
-    
-    ## The Appeal of SAX    
-    
-    (Thanks a lot tsoding, for sending me on this mad quest.)
-    
-    The term SAX refers to [Simple API for XML](https://en.wikipedia.org/wiki/Simple_API_for_XML), an XML parser based around using a bunch of event callbacks to tell the parser what to actaully *do* as it reads through a file.
-    It's honestly sort of like just having a tokenizer, but the control is really inverted because instead of asking the tokenizer for tokens, the parser ask you what to do when it encounters all the file's *stuff*.
-    (I'm explaining this very poorly, but I linked the Wikipedia article, so you can actually just read that if you care. You have agency and such.)
-    
-    I never actually used SAX myself, but I got the vague idea of what it's going for and thought that it would be just a lovely way to rewrite my GON parser (at this time, in C).
-    See, while I was writing my C implementation, I had originally gotten some big idea about how I would 
-    
-    
-    ## Why Not
-    
-    1. decoupling the GON document's structure from the data's internal structure
-        
-        In the SAX parser, evaluating paths to specific fields is not really as straightforward as one might think. 
-        You have to do this weird sort of thing of tracking how far you currently are down each path as you step into and out of objects and arrays.
-        And then when you get to the end of a given path, you've got to mark that path as complete in some way.
-        It's not like it's particularyl difficult logic to deal with, it's just kind of weird and finnicky.
-    
-    2. symmetry between parsing and serialization
-    
-    3. simplicity (in some dimension)
-    
-        For parsing, my old SAX implementation was certainly less code than even my current DOM implementation.
-        
-        The DOM implementation gets a big simplicity boost with the addition of the flat pool allocator.
-        Not having to really think about freeing node anymore just lifts off 90% of the additional mental burden that the DOM implementation would otherwise have over the SAX-style parser.
-        
-        
-    4. (bonus reason, because it's not really applicable anymore) extra features
-    
-        The main reason I went back to using a DOM in the first place was because I wanted to be able to evaluate references between fields, and this is not really possible in SAX-style parsing.
-        By references, I mean being able to use some special syntax and a field path string to get the value, index, or a pointer to another field in the file.
-        This may seem somewhat trivial, and for a DOM parser, it is. But not so for SAX.
-        Implementing forward-references is not to hard with SAX-style parsing, 
-            since you can just make a note to update the value of the referee when the referent is found.
-        But because the parser only goes forwards, there's no way to make reference to fields found earlier in the file.
-        
-        Now, I may have gone a bit *too* ham on field references when I first implemented them in GON, particularly with value references.
-        In addition to value references on individual fields, I implemented value references on objects, 
-            which involved cloning entire subtrees on the DOM and pasting them into other places.
-        And this means that the process of resolving field references becomes an iterative solver, 
-            since we can end up in situations where we have a reference to with some path which does not yet exist, 
-            but will exist after we clone some child nodes onto a different parent.
-        While all of this worked, and the feature was pretty cool, it added too much additinal code (and complexity) to the module, 
-            which I do not feel was justified by the marginal usefulness of the feature.
-        
-        And so, here we are now. I have ripped out all of that and more, and the parser is back in a more manageable (and readable) state.
-            The focus now is to take the opportunity afforded by that newfound simplicity to 
-        
-        
-*/

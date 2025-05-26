@@ -172,7 +172,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
     return true;
 }
 
-append_gon_string :: (builder: *String_Builder, text: string, quote_char: u8 = #char "\"") -> bool {
+append_gon_string :: (builder: *String_Builder, text: string, quote_char: u8 = "\"") -> bool {
     append(builder, quote_char);
     ok := revert_escape_sequences(builder, text);
     append(builder, quote_char);

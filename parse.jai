@@ -40,7 +40,7 @@ load_and_parse_file :: (file_path: string) -> Parser, bool {
     return parser, ok;
 }
 
-parse_file :: (file: string, file_path: string) -> (Parser, bool) {
+parse_file :: (file: string, file_path: string) -> Parser, bool {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom(*parser)  return .{}, false;
@@ -98,7 +98,7 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
         io_data := get_io_data(node.binding.type);
         if io_data && io_data.parse_proc {
             if io_data.parse_proc(node.binding, node.value) {
-                log("%:%,%: GON Data Binding Error: parse_proc failed.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "parse_proc failed.");
                 return false;
             }
             return true;
@@ -216,16 +216,18 @@ construct_dom :: (using parser: *Parser) -> bool {
     return true;
 }
 
-
+log_binding_error :: (node: *Node, format: string, arguments: ..Any) {
+    message := tprint(format, ..arguments);
+    log("%:%,%: GON data binding error: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, message);
+}
 
 add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     if node == null || binding.type == null  return true;
     
     if node.binding.type != null {
-        log("Error: node already has a data binding set. Node path: %", format_node_path(node));
+        log_binding_error(node, "node already has a data binding set. Node path: %", format_node_path(node));
         return false;
     }
-    
     node.binding = binding;
     
     name_member:      *Type_Info_Struct_Member;
@@ -289,86 +291,100 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             element_has_name  := element_io_data != null && element_io_data.name_member != null;
             
             if element_is_struct && !element_has_name {
-                log("%:%,%: GON data binding error: GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");
                 return false;
             }
             
             if !is_indexed && !element_is_struct {
-                log("%:%,%: GON data binding error: GON object with binding to array must either be indexed or contain a struct type with a defined IO_Data name member.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "GON object with binding to array must either be indexed or contain a struct type with a defined IO_Data name member.");
                 return false;
             }
             
-            get_element_index :: (node: *Node, array_io_data: *IO_Data) -> int, bool {
-                if array_io_data.enum_index_type {
-                    index, ok := enum_name_to_value(xx array_io_data.enum_index_type, node.name);
-                    if !ok {
-                        log("%:%,%: GON data binding error: Unable to parse enum value from string: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.name);
-                        return 0, false;
-                    }
-                    return index, true;
-                } else {
-                    index, ok, remainder := to_integer(node.name);
-                    if !ok || remainder {
-                        log("%:%,%: GON data binding error: Unable to parse integer from string: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, node.name);
-                        return 0, false;
-                    }
-                    return index, true;
-                }
-            }
-            
-            if array.array_type == .RESIZABLE {
-                raw_array := array.value_pointer.(*Resizable_Array);
-                if is_indexed {
+            if is_indexed {
+                min_index, max_index := S64_MAX, S64_MIN;
+                if io_data.enum_index_type {
                     for node.children {
-                        elem_index, ok := get_element_index(it, io_data);
-                        if !ok  return false;
-                        
-                        elem_any := array_add_any_at_index(node.binding, elem_index);
-                        if !add_data_binding_to_node(it, elem_any)  return false;
-                    }
-                } else {
-                    count_before := raw_array.count;
-                    array_reserve(raw_array, count_before + node.children.count, array.element_type.runtime_size);
-                    raw_array.count += node.children.count;
-                    for node.children {
-                        if !add_data_binding_to_node(it, array[count_before + it_index])  return false;
-                    }
-                }
-            } else { // .FIXED and .VIEW
-                if is_indexed {
-                    // NOTE: We don't dynamically allocate for views with indexed elements, since it's not clear exactly how that should work.
-                    for node.children {
-                        index, ok := get_element_index(it, io_data);
-                        if !ok  return false;
-                        
-                        element:, ok = array[it_index];
+                        index, ok := enum_name_to_value(xx io_data.enum_index_type, node.name);
                         if !ok {
-                            log("%:%,%: GON data binding error: array index is out of bounds.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                            log_binding_error(node, "unable to parse enum value from string: %", node.name);
                             return false;
                         }
-                        if !add_data_binding_to_node(it, element)  return false;
+                        min_index = min(min_index, index);
+                        max_index = max(max_index, index);
                     }
                 } else {
+                    for node.children {
+                        index, ok, remainder := to_integer(node.name);
+                        if !ok || remainder {
+                            log_binding_error(node, "unable to parse integer from string: %", node.name);
+                            return false;
+                        }
+                        min_index = min(min_index, index);
+                        max_index = max(max_index, index);
+                    }
+                }
+                
+                // TODO: add a configurable absolute max index so that we don't resize to some insane amount.
+                if min_index < 0 || max_index < 0 {
+                    log_binding_error(node, "invalid array index: %, index cannot be negative.", min_index);
+                    return false;
+                }
+                if array.array_type == {
+                  case .RESIZABLE;
+                    resize(array, max_index);
+                    
+                  case .FIXED; #through;
+                  case .VIEW;
                     count, data := get_count_and_data(array);
                     if data {
                         if node.children.count > count {
-                            log("%:%,%: GON data binding error: bounds check failed on array or slice.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                            log_binding_error(node, "bounds check failed on array or slice.");
+                            return false;
+                        }
+                    } else if array.array_type == .VIEW {
+                        assert(count == 0);
+                        resize(array, max_index);
+                    }
+                }
+                
+                if io_data.enum_index_type {
+                    for node.children {
+                        index := enum_name_to_value(xx io_data.enum_index_type, node.name);
+                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                    }
+                } else {
+                    for node.children {
+                        index := to_integer(node.name);
+                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                    }
+                }
+                
+            } else {
+                count, data := get_count_and_data(array);
+                if array.array_type == {
+                  case .RESIZABLE;
+                    resize(array, node.children.count + count);
+                    
+                  case .FIXED; #through;
+                  case .VIEW;
+                    if data {
+                        if node.children.count > count {
+                            log_binding_error(node, "bounds check failed on array or slice.");
                             return false;
                         }
                     } else if array.array_type == .VIEW {
                         assert(count == 0);
                         resize(array, node.children.count);
                     }
-                    
-                    for node.children {
-                        if !add_data_binding_to_node(it, array[it_index])  return false;
-                    }
+                }
+                for node.children {
+                    if !add_data_binding_to_node(it, array[it_index])  return false;
                 }
             }
             
             
           case;
-            log("%:%,%: GON data binding error: GON object cannot be bound to type %.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
+            log_binding_error(node, "GON object cannot be bound to type %.", as_type(node.binding.type));
             return false;
         }
         
@@ -381,12 +397,12 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             // This is done partially to prevent any possible complications that the duplicated bindings could cause during serialization.
             ti_enum := node.binding.type.(*Type_Info_Enum);
             if !(ti_enum.enum_type_flags & .FLAGS) {
-                log("%:%,%: GON data binding error: cannot bind an enum to an array unless it is an enum_flags.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "cannot bind an enum to an array unless it is an enum_flags.");
                 return false;
             }
             for node.children {
                 if it.node_type != .FIELD {
-                    log("%:%,%: GON data binding error: invalid structure in GON array with binding to enum_flags. All elements in array must be simple fields, since each value represents a flag which is set in the enum_flags value.", it.location.fully_pathed_filename, it.location.line_number, it.location.character_number);
+                    log_binding_error(node, "invalid structure in GON array with binding to enum_flags. All elements in array must be simple fields, since each value represents a flag which is set in the enum_flags value.", it.location.fully_pathed_filename, it.location.line_number, it.location.character_number);
                 }
             }
             
@@ -395,7 +411,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             ti_struct := node.binding.type.(*Type_Info_Struct);
 
             if node.children.count > ti_struct.members.count {
-                log("%:%,%: GON data binding error: GON array contains more elements than can be mapped to the struct members of type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(ti_struct));
+                log_binding_error(node, "GON array contains more elements than can be mapped to the struct members of type: %", as_type(ti_struct));
                 return false;
             }
             for node.children {
@@ -436,7 +452,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 count, data := get_count_and_data(array);
                 if data {
                     if node.children.count > count {
-                        log("%:%,%: GON data binding error: bounds check failed on array or slice.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                        log_binding_error(node, "bounds check failed on array or slice.");
                         return false;
                     }
                 } else if array.array_type == .VIEW {
@@ -451,7 +467,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             
             
           case;
-            log("%:%,%: GON data binding error: GON array cannot be bound to type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
+            log_binding_error(node, "GON array cannot be bound to type: %", as_type(node.binding.type));
             return false;
         }
         
@@ -467,24 +483,24 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             // For fields, we must verify that the parent binding is the same as the field binding
             ti_enum := node.binding.type.(*Type_Info_Enum);
             if (ti_enum.enum_type_flags & .FLAGS) && node.parent.binding.value_pointer != node.binding.value_pointer {
-                log("%:%,%: GON data binding error: GON field cannot be bound directly to an enum_flags, use a GON array instead.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "GON field cannot be bound directly to an enum_flags, use a GON array instead.");
                 return false;
             }
             
           case .ARRAY;
             if node.binding.type.(*Type_Info_Array).element_type == type_info(u8) {
-                log("%:%,%: GON data binding error: Unable to bind GON field to array type. (A special exception is made for arrays of u8, so that they can be treated like strings.)", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "unable to bind GON field to array type. (A special exception is made for arrays of u8, so that they can be treated like strings.)");
                 return false;
             }
             
           case .STRUCT;
             if !io_data || !io_data.parse_proc {
-                log("%:%,%: GON data binding error: Unable to bind GON field to struct type unless an IO_Data parse_proc is defined.", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number);
+                log_binding_error(node, "unable to bind GON field to struct type unless an IO_Data parse_proc is defined.");
                 return false;
             }
             
           case;
-            log("%:%,%: GON data binding error: Unable to bind GON field to type: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, as_type(node.binding.type));
+            log_binding_error(node, "unable to bind GON field to type: %", as_type(node.binding.type));
             return false;
         }
         
@@ -495,7 +511,6 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     return true;
 }
 
-#scope_module
 
 set_value_from_string :: (value: Any, text: string, should_copy_strings := true) -> bool {
     if text.count <= 0  return true;
@@ -515,9 +530,4 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
     
     return Convert.set_value_from_string(value, text, should_copy_strings);
 }
-
-
-#scope_file
-
-#import "File";
 

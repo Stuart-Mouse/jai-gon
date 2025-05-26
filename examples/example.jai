@@ -43,7 +43,6 @@ main :: () {
     }
     
     // We set up some IO Data for the `Thing` struct so that we get nicer syntax in the GON file, and more compact serialization.
-    // The name_member 
     add_io_data(Thing, .{
         name_member = get_field(type_info(Thing), "name"),
         flags       = .SKIP_ELEMS_IF_EMPTY
@@ -52,7 +51,7 @@ main :: () {
     // Once can also load the file manually and call parse_file() instead.
     // But this version is often nicer, because we pass along the file path to the parser for use in error logging.
     parser, ok := load_and_parse_file("test.gon");
-    if !ok return;
+    if !ok  return;
     defer deinit_parser(*parser);
     
     // This call will create a new data bindings between our internal `things` array and the GON DOM.
@@ -87,9 +86,14 @@ main :: () {
     
     print("Behold, the things we parsed:\n%\n", things);
     
+    
+    
     // The parser is also used for serialization.
     // We create a new instance here so that we can create a new DOM from scratch.
     init_parser(*parser, "");
+    
+    // Uncomment this line to see Vector3 serialized as a GON array instead of a GON object.
+    // add_io_data(Vector3, .{ flags = .AS_ARRAY });
     
     // Like add_data_bindings, this procedure works recursively, 
     // generating DOM nodes for every single array element and member variable.
@@ -97,6 +101,8 @@ main :: () {
     
     // You may also serialize directly to a file with serialize_to_file().
     output:, ok = serialize_to_string(*parser);
+    if !ok  return;
     defer free(output);
-    if ok  print("%\n", output);
+    
+    print("Behold, the GON ouput we serialized:\n%\n", output);
 }

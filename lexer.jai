@@ -78,10 +78,10 @@ lex_next_token :: (using lexer: *Lexer) -> Token {
     
     // single character tokens
     if file[0] == {
-      case #char "{";  advance(lexer);  return .{ .OBJECT_BEGIN, "{", token_location };
-      case #char "}";  advance(lexer);  return .{ .OBJECT_END,   "}", token_location };
-      case #char "[";  advance(lexer);  return .{ .ARRAY_BEGIN,  "[", token_location };
-      case #char "]";  advance(lexer);  return .{ .ARRAY_END,    "]", token_location };
+      case "{";  advance(lexer);  return .{ .OBJECT_BEGIN, "{", token_location };
+      case "}";  advance(lexer);  return .{ .OBJECT_END,   "}", token_location };
+      case "[";  advance(lexer);  return .{ .ARRAY_BEGIN,  "[", token_location };
+      case "]";  advance(lexer);  return .{ .ARRAY_END,    "]", token_location };
     }
     
     token_text := try_lex_number(lexer);
@@ -91,15 +91,15 @@ lex_next_token :: (using lexer: *Lexer) -> Token {
     if token_text  return .{ .IDENTIFIER, token_text, token_location };
     
     // parse string
-    // NOTE: only supporting reqular (double) quotes at the moment due to the fact that we don't preserve info about what type of quotes parsed in file.
-    if file[0] == #char "\"" { 
+    // NOTE: only supporting regular (double) quotes at the moment due to the fact that we don't preserve info about what type of quotes parsed in file.
+    if file[0] == "\"" { 
         quote_char := file[0];
         
         if !advance(lexer)  return make_error_token("Unexpected EOF while parsing string", token_location);
         token_text := string.{ 0, file.data };
         
         while file[0] != quote_char {
-            if file[0] == #char "\\" {
+            if file[0] == "\\" {
                 _, ok := parse_escape_sequence(lexer);
                 if !ok  return make_error_token("Invalid escape sequence encountered while parsing string", token_location);
             } else {
@@ -115,7 +115,7 @@ lex_next_token :: (using lexer: *Lexer) -> Token {
     return make_error_token("Unexpected character encountered", token_location);
 }
 
-begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char == #char "_"; }
+begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char == "_"; }
 continues_identifier :: is_alnum;
 
 try_lex_identifier :: (using lexer: *Lexer) -> string {
@@ -142,8 +142,8 @@ skip_whitespace_and_comments :: (using lexer: *Lexer) -> bool {
         while is_any(file[0], whitespace_chars) {
             if !advance(lexer) return false;
         }
-        if file[0] == #char "#" {
-            while file[0] != #char "\n" {
+        if file[0] == "#" {
+            while file[0] != "\n" {
                 if !advance(lexer) return false;
             }
         }
