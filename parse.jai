@@ -40,6 +40,7 @@ load_and_parse_file :: (file_path: string) -> Parser, bool {
     return parser, ok;
 }
 
+
 parse_file :: (file: string, file_path: string) -> Parser, bool {
     parser: Parser;
     init_parser(*parser, file);

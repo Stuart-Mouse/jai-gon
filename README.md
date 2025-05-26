@@ -1,9 +1,12 @@
 # Jai GON Parser
 
-The Jai GON Parser is a fast and powerful parser for GON files with a simple interface that one can begin using within minutes.
+
+The Jai GON Parser is a fast and powerful GON parser with a simple interface that one can begin using within minutes.
+
 
 This parser leverages the power of Jai's runtime type information to automatically convert string data from the GON file into its proper internal binary type. 
 This automates away all of the routine boilerplate that one often finds oneself writing in parsing and serialization code. All you have to do is tell the parser where in the GON file to find your desired data and what variable you want that data stored to. The parser handles any necessary type conversions automatically. It also handles complex, nested structures and all types of arrays. 
+
 
 For a more extensive description of the project, please visit stuart-mouse.github.io/jai-gon.
 
@@ -88,4 +91,5 @@ However, field references and many other features are available in my LSD file p
 I'm not gonna try to upsell you on the new model here, though. 
 LSD may interest you if you want a more rich data format, but be warned it'll certainly be far less stable than GON moving forwards.
 The simplicity of GON may also just be better for your use case too. 
+
 

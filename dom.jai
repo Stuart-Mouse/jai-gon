@@ -97,6 +97,7 @@ find_child_node_by_name :: (parent: *Node, name: string) -> (*Node, int) {
     return null, -1;
 }
 
+
 // TODO: sort of a leftover from field references, maybe we remove this...
 get_lexical_index :: (node: *Node) -> int {
     if node == null  return -1;
