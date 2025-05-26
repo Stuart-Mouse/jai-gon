@@ -65,8 +65,6 @@ Lexer improvements
             could also help in preserving the type of quotation marks used around a string
 
 
-add better logging functions a la tbd module report_parse_error
-
 need to finish writing some basic test cases?
     at least need to manually test stuff again before publishing
     
@@ -74,10 +72,6 @@ try to remove some dependencies on Convert.jai and Utils module if possible?
     can't really, now that we use scanner.jai and just moved out set_value_form_string...
     just work on clarifying and organizing dependencies in the future
 
-
-serialize.jai is pretty good right now
-dom.jai is pretty good too, but maybe we should think about making more stuff #scope_module until it's more hardened
-parse.jai is probably the most messy at the moment
 
 
 ## How much to simplify?

@@ -27,6 +27,7 @@ Arrays enclose several unnamed values in a pair of matching square brackets.
 
 Again, it's basically just JSON but with sparser syntax.
 
+
 ## Data Bindings
 
 The main feature of this parser is how it automatically handles all data marshalling through what I've taken to calling 'data bindings'.
@@ -56,12 +57,8 @@ Any of the following data types can be bound to a GON array:
     - all arrays
     - enums_flags
     
-    
-#### Examples
-
-```
-TODO: PUT EXAMPLES HERE
-```
+For examples of how data bindings are used in practice, run the included 'examples.jai'.
+This file demonstrates both parsing and serialization with data bindings.
 
 
 ## IO Data
@@ -70,10 +67,10 @@ IO Data is a special informational structure that the user can define for any ty
 changing how the parser handles that type when evaluating data bindings.
 
 Here are the primary features:
-    - serializing structs as GON arrays
-    - defining arrays as being indexed, and their indexing enum type (if applicable)
-    - serializing structs and arrays on one line
-    - 
+- serializing structs as GON arrays
+- defining arrays as being indexed, and their indexing enum type (if applicable)
+- serializing structs and arrays on one line
+- omitting data which is zero-valued during serialization
 
 
 ## User Extension
@@ -81,8 +78,8 @@ Here are the primary features:
 This IO Data system is provided so that the user can extend the parser in some simple ways, 
 but if your needs are not covered by what is already offered through IO Data, 
 you may wish to just modify `add_data_binding_to_node` and `process_node_binding` directly.
+Or, add a post-processing pass over the data you load after you load it. 
 
-Or, add a post-processing pass over the data you load, after you load it. 
 The parser used to have some additional features for handling references between fields, 
 but that functionality was removed in a recent refactor. 
 There were several reasons for this, but the main reason is that value add just didn't justify the extra code, so I chunked it.

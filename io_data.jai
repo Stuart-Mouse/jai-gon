@@ -26,7 +26,8 @@ IO_Data :: struct {
         // elements within indexed arrays will also be skipped if 0-valued
         SKIP_IF_EMPTY;
         
-        // TODO: we should probaly replace SKIP_ELEMS_IF_EMPTY functionality on structs with SKIP_MEMBERS_WITH_DEFAULT_VALUES functionality. This would be more usefull.
+        // TODO: we should probaly replace SKIP_ELEMS_IF_EMPTY functionality on structs with SKIP_MEMBERS_WITH_DEFAULT_VALUES functionality. This would be more useful.
+        //       the only issue is that we would need to dynamically construct a default-intiialized instance to compare to, which would be slow. 
         
         // will skip array elems or struct members if they are empty
         // will not skip the array/object itself due to being empty, you would just get "array []" or "object {}"
