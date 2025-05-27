@@ -67,10 +67,14 @@ Lexer improvements
 
 need to finish writing some basic test cases?
     at least need to manually test stuff again before publishing
+        need to test indexed arrays and enum-indexed arrays
+        need to test custom io data parsing and serialization procs
     
 try to remove some dependencies on Convert.jai and Utils module if possible?
     can't really, now that we use scanner.jai and just moved out set_value_form_string...
     just work on clarifying and organizing dependencies in the future
+
+
 
 
 
