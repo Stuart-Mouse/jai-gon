@@ -205,9 +205,12 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
             for array {
                 // TODO: better handling for indexed and object arrays using IO data
                 elem_name: string;
-                if element_io_data && element_io_data.name_member
-                    then Convert.any_to_any(elem_name, get_member_any(it.value_pointer, element_io_data.name_member));
-                    else elem_name = tprint("%", it_index);
+                if element_io_data && element_io_data.name_member {
+                    name_member := get_member(it, element_io_data.name_member);
+                    Convert.any_to_any(elem_name, name_member);
+                } else {
+                    elem_name = tprint("%", it_index);
+                }
                 insert_data_node(parser, node, elem_name, it);
             }
         }
