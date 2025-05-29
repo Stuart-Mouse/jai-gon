@@ -2,6 +2,7 @@
 #import "File";
 #import "Math";
 #import "Reflection";
+#import "String";
 
 #import "GON";
 
@@ -11,7 +12,6 @@ Thing :: struct {
     numbers:    [5] int;
     position:   Vector3;
     flags:      Flags;
-    fruit:      Fruits;
 }
 
 Flags :: enum_flags {
@@ -20,18 +20,46 @@ Flags :: enum_flags {
     THIRD;
 }
 
+// to demonstrate custom parsing and serialization procs
+CSV :: [] string;
+
+string_to_csv :: (val: Any, str: string) -> bool {
+    assert(val.type == xx CSV);
+    csv := val.value_pointer.(*CSV);
+    csv.* = split(str, ",".(u8));
+    return true;
+}
+
+csv_to_string :: (val: Any) -> string, bool {
+    assert(val.type == xx CSV);
+    csv := val.value_pointer.(*CSV);
+    return join(..csv.*, separator = ","), true;
+}
+
+
+
+// to demonstrate enum-indexed arrays
 Fruits :: enum {
     APPLE;
     PEAR;
     BANANA;
     STRAWBERRY;
     KIWI;
+    
+    _COUNT;
 }
+
+Fruit_Facts :: [Fruits._COUNT] struct {
+    nutrition:    int;
+    flavor:       int;
+    description:  string;
+};
+
 
 main :: () {
     // This array and everything within it will get filled in by the parser.
     // (You can also change this to a resizable array, and it will work the same.)
-    things: [] Thing;
+    things:      [] Thing;
     
     // For the sake of setting a good example, let's clean up after ourselves.
     defer {
@@ -48,6 +76,22 @@ main :: () {
         flags       = .SKIP_ELEMS_IF_EMPTY
     });
     
+    
+    // some other things we want to parse from the same file
+    fruit_facts: Fruit_Facts;
+    csv:         CSV;
+    
+    add_io_data(Fruit_Facts, .{
+        flags = .ARRAY_INDEXED,
+        enum_index_type = xx Fruits
+    });
+    
+    add_io_data(CSV, .{
+        parse_proc     = string_to_csv,
+        serialize_proc = csv_to_string
+    });
+    
+    
     // Once can also load the file manually and call parse_file() instead.
     // But this version is often nicer, because we pass along the file path to the parser for use in error logging.
     parser, ok := load_and_parse_file("test.gon");
@@ -61,6 +105,15 @@ main :: () {
     // This means that for our program to be correct, we would need to free the `name` and `text` members of each element of `things`, as well as `things` itself.
     if !add_data_binding(*parser, things, "things") {
         log("Error: failed to add data binding to GON DOM.");
+        return;
+    }
+    
+    // add the remaining data bindings
+    if !add_data_bindings(*parser,
+        .{ csv,         "foo/csv" },
+        .{ fruit_facts, "foo/bar/fruit_facts" },
+    ) {
+        log("Error: failed to add data bindings to GON DOM.");
         return;
     }
     
@@ -84,7 +137,8 @@ main :: () {
     // and we can more easily compare to the re-serialized GON output below.
     context.print_style.default_format_struct.use_newlines_if_long_form = true;
     
-    print("Behold, the things we parsed:\n%\n", things);
+    print("Behold, the things we parsed:\nthings: %\nfruit_facts: %\ncsv: %\n\n", things, fruit_facts, csv);
+    
     
     
     
@@ -98,6 +152,8 @@ main :: () {
     // Like add_data_bindings, this procedure works recursively, 
     // generating DOM nodes for every single array element and member variable.
     insert_data_node(*parser, null, "things", things);
+    insert_data_node(*parser, null, "csv", csv);
+    insert_data_node(*parser, null, "fruit_facts", fruit_facts);
     
     // You may also serialize directly to a file with serialize_to_file().
     output:, ok = serialize_to_string(*parser);

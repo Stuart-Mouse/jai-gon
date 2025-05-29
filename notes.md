@@ -95,26 +95,12 @@ Another option, not really for GON, but for LSD with regard to field references 
 this put a little more burden on the script context o provide all the right bindings, but that's pretty much already the direction that LSD is going, so no biggie i think
 
 
-
-## Directives
-
-`#identifier(...)`
-
-Capture everything inside the parenthesis, considers matching inner pairs of parens ?
-    give the user the idrective parameters as one big string, or as an array of tokens?
-    doing tokens is probably the best option since once can always just pass a string to the directive
-
-What can directives do?
-    produce a typed value? 
-    modify previous/parent field?
-    modify parser state?
-    
     
     
 
 
 
-
+unfinished blog post thing:
 
 
 # Why use a DOM instead of SAX-style parsing?

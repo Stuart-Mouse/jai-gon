@@ -64,7 +64,23 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
         for 0..indent-1  append(builder, INDENTATION_STRING);
     }
     
-    if !in_array {
+    // @Cleanup: this is all kinda gross and I don't like the temp string in node.name thing that we are doing in insert_data_node
+    //           we can probably signify more precisely what should be done here if we pass some flags structure as parameter
+    should_write_name := !in_array;
+    
+    if should_write_name {
+        if node.parent && node.parent.binding.type {
+            parent_io_data := get_io_data(node.parent.binding.type);
+            if parent_io_data && (.ARRAY_INDEXED & parent_io_data.flags) {
+                should_write_name = false;
+                // node.name will have a temp string with the array index (see insert_data_node)
+                append(builder, node.name);
+                append(builder, " ");
+            }
+        }
+    }
+    
+    if should_write_name {
         if is_legal_identifier(node.name) 
             then append(builder, node.name);
             else append_gon_string(builder, node.name);
@@ -180,6 +196,13 @@ append_gon_string :: (builder: *String_Builder, text: string, quote_char: u8 = "
 }
 
 append_field_value :: (builder: *String_Builder, value: Any) -> bool {
+    io_data := get_io_data(value.type);
+    if io_data && io_data.serialize_proc {
+        string_value, ok := io_data.serialize_proc(value);
+        append_gon_string(builder, string_value);
+        return ok;
+    }
+    
     if value.type.type == {
       case .STRING;
         // always enclose in quotes and escape any characters which need to be escaped
@@ -198,14 +221,7 @@ append_field_value :: (builder: *String_Builder, value: Any) -> bool {
         print(builder, "%", value);
         
       case .STRUCT;
-        // require custom serialization proc
-        io_data := get_io_data(value.type);
-        if !io_data || !io_data.serialize_proc {
-            log("Error: unable to serialize struct as GON field without a custom serialization proc.");
-            return false;
-        }
-        string_value, ok := io_data.serialize_proc(value);
-        append_gon_string(builder, string_value);
+        log("Error: unable to serialize struct as GON field without a custom serialization proc.");
         
       case .ARRAY;
         ti_array := value.type.(*Type_Info_Array);

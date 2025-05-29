@@ -98,7 +98,7 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
         
         io_data := get_io_data(node.binding.type);
         if io_data && io_data.parse_proc {
-            if io_data.parse_proc(node.binding, node.value) {
+            if !io_data.parse_proc(node.binding, node.value) {
                 log_binding_error(node, "parse_proc failed.");
                 return false;
             }
@@ -291,7 +291,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             element_is_struct := array.element_type.type == .STRUCT;
             element_has_name  := element_io_data != null && element_io_data.name_member != null;
             
-            if element_is_struct && !element_has_name {
+            if !is_indexed && element_is_struct && !element_has_name {
                 log_binding_error(node, "GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");
                 return false;
             }
@@ -305,9 +305,9 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 min_index, max_index := S64_MAX, S64_MIN;
                 if io_data.enum_index_type {
                     for node.children {
-                        index, ok := enum_name_to_value(xx io_data.enum_index_type, node.name);
+                        index, ok := enum_name_to_value(xx io_data.enum_index_type, it.name);
                         if !ok {
-                            log_binding_error(node, "unable to parse enum value from string: %", node.name);
+                            log_binding_error(it, "unable to parse enum value from string: %", it.name);
                             return false;
                         }
                         min_index = min(min_index, index);
@@ -315,9 +315,9 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                 } else {
                     for node.children {
-                        index, ok, remainder := to_integer(node.name);
+                        index, ok, remainder := to_integer(it.name);
                         if !ok || remainder {
-                            log_binding_error(node, "unable to parse integer from string: %", node.name);
+                            log_binding_error(it, "unable to parse integer from string: %", it.name);
                             return false;
                         }
                         min_index = min(min_index, index);
@@ -350,13 +350,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 
                 if io_data.enum_index_type {
                     for node.children {
-                        index := enum_name_to_value(xx io_data.enum_index_type, node.name);
-                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                        index := enum_name_to_value(xx io_data.enum_index_type, it.name);
+                        if !add_data_binding_to_node(it, array[index])  return false;
                     }
                 } else {
                     for node.children {
-                        index := to_integer(node.name);
-                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                        index := to_integer(it.name);
+                        if !add_data_binding_to_node(it, array[index])  return false;
                     }
                 }
                 
