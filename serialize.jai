@@ -35,27 +35,30 @@ serialize_to_builder :: (using parser: *Parser, builder: *String_Builder) -> boo
     but there's also little enough code here, I think, that it's relatively understandable if you feel the need to modify it.
 */
 
-serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line := false, skip_if_empty := false) -> bool {
+Serialize_Flags :: enum_flags {
+    SAME_LINE;
+    SKIP_IF_EMPTY;
+    IN_ARRAY;
+    IN_INDEXED_ARRAY;
+    IS_FIRST_CHILD;
+}
+
+serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags: Serialize_Flags = xx 0, enum_index_type: *Type_Info = null) -> bool {
     if node == null  return false;
     
     io_data := get_io_data(node.binding.type);
     
-    if skip_if_empty || (io_data && (io_data.flags & .SKIP_ELEMS_IF_EMPTY)) {
+    if (flags & .SKIP_IF_EMPTY) || (io_data && (io_data.flags & .SKIP_IF_EMPTY)) {
         if all_bytes_are_zero(node.binding) {
             return true;
         }
     }
     
-    in_array       := false;
-    is_first_child := false;
-
-    if node.parent != null {
-        in_array       = node.parent.node_type == .ARRAY;
-        is_first_child = node == node.parent.children.first;
-    }
+    same_line := (flags & .SAME_LINE).(bool);
     
-    if (same_line || in_array) && !is_first_child 
+    if (flags & (.SAME_LINE | .IN_ARRAY)) && !(flags & .IS_FIRST_CHILD) {
         append(builder, ",");
+    }
     
     if same_line {
         append(builder, " ");
@@ -64,23 +67,12 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
         for 0..indent-1  append(builder, INDENTATION_STRING);
     }
     
-    // @Cleanup: this is all kinda gross and I don't like the temp string in node.name thing that we are doing in insert_data_node
-    //           we can probably signify more precisely what should be done here if we pass some flags structure as parameter
-    should_write_name := !in_array;
-    
-    if should_write_name {
-        if node.parent && node.parent.binding.type {
-            parent_io_data := get_io_data(node.parent.binding.type);
-            if parent_io_data && (.ARRAY_INDEXED & parent_io_data.flags) {
-                should_write_name = false;
-                // node.name will have a temp string with the array index (see insert_data_node)
-                append(builder, node.name);
-                append(builder, " ");
-            }
-        }
-    }
-    
-    if should_write_name {
+    if flags & .IN_INDEXED_ARRAY {
+        // determine real index within parent array
+        parent_array := Any_Array.from(node.parent.binding);
+        index := get_element_index(parent_array, node.binding.value_pointer);
+        print(builder, "% ", Any.{ ifx enum_index_type else xx int, *index });
+    } else if !(flags & .IN_ARRAY) {
         if is_legal_identifier(node.name) 
             then append(builder, node.name);
             else append_gon_string(builder, node.name);
@@ -109,7 +101,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
             ti_enum := node.binding.type.(*Type_Info_Enum);
             assert(ti_enum.enum_type_flags & .FLAGS == .FLAGS); 
             same_line = true; // currently always on one line
-
+            
             // NOTE: the below logic for printing the enum_flags values has been copied from Print.jai
             
             target_value := get_u64_from_void_pointer(node.binding.value_pointer, node.binding.type.runtime_size);  // Treat flags as unsigned, even for signed types. Simpler.
@@ -146,7 +138,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
                 append(builder, ti_enum.names[it_index]);
                 first = false;
             }
-
+            
             unmatched := flags_total & ~flags_printed;
             if unmatched {
                 if !first  append(builder, ", 0x");
@@ -154,9 +146,17 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
                 print_u64_base_n(builder, unmatched, format);
             }
         } else {
-            for child: node.children 
-                if !serialize_node(builder, child, indent + 1, same_line, should_skip_empty_elements)  
-                    then return false;
+            flags: Serialize_Flags = .IS_FIRST_CHILD 
+                | (ifx is_array then .IN_ARRAY)
+                | (ifx io_data && (io_data.flags & .ARRAY_INDEXED) then .IN_INDEXED_ARRAY)
+                | (ifx same_line then .SAME_LINE)
+                | (ifx should_skip_empty_elements then .SKIP_IF_EMPTY);
+                
+            enum_index_type := ifx io_data then io_data.enum_index_type;
+            for node.children {
+                if !serialize_node(builder, it, indent + 1, flags, enum_index_type)  return false;
+                flags &= ~.IS_FIRST_CHILD;
+            }
         }
         
         if same_line {
@@ -169,17 +169,11 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, same_line
         append(builder, ifx is_array then "]" else "}");
         
       case .FIELD;
-        // TODO: should probably switch on node.value.type
         if node.binding.type {
             append_field_value(builder, node.binding);
         } else if node.value {
             append_field_value(builder, node.value);
         } else {
-            // TODO: maybe we can pass void as the value as a special case ?
-            //       but this will not work as we still need the value type...
-            //       and at this point we've already written the field name, so can't back out
-            //       maybe we should jsut check if field is valid before writing the name. 
-            //       any field which has no binding or string value should just be omitted
             log("Error: no value defined for node '%v'\n", format_node_path(node));
             return false;
         }

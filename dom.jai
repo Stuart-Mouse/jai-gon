@@ -208,23 +208,11 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
             element_io_data := get_io_data(array.element_type);
             for array {
                 elem_name: string;
-                child_insert_mode := insert_mode;
-                
                 if element_io_data && element_io_data.name_member {
                     name_member := get_member(it, element_io_data.name_member);
                     Convert.any_to_any(elem_name, name_member);
-                } else if io_data && (io_data.flags & .ARRAY_INDEXED) {
-                    if io_data.enum_index_type {
-                        elem_name = tprint("%", Any.{ io_data.enum_index_type, *it_index });
-                    } else {
-                        elem_name = tprint("%", it_index);
-                    }
-                } else {
-                    // @Cleanup: need a better solution for handling insert modes wrt array nodes
-                    // otherwise we will just overwrite the same child element, bc array elements don't have names
-                    child_insert_mode = .ALLOW_DUPLICATE;
                 }
-                insert_data_node(parser, node, elem_name, it, child_insert_mode);
+                insert_data_node(parser, node, elem_name, it, .ALLOW_DUPLICATE);
             }
         }
     }

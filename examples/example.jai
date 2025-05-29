@@ -20,6 +20,7 @@ Flags :: enum_flags {
     THIRD;
 }
 
+
 // to demonstrate custom parsing and serialization procs
 CSV :: [] string;
 
@@ -56,6 +57,7 @@ Fruit_Facts :: [Fruits._COUNT] struct {
 };
 
 
+
 main :: () {
     // This array and everything within it will get filled in by the parser.
     // (You can also change this to a resizable array, and it will work the same.)
@@ -84,6 +86,10 @@ main :: () {
     add_io_data(Fruit_Facts, .{
         flags = .ARRAY_INDEXED,
         enum_index_type = xx Fruits
+    });
+    
+    add_io_data(type_of(fruit_facts[0]), .{
+        flags = .AS_ARRAY,
     });
     
     add_io_data(CSV, .{
@@ -136,8 +142,9 @@ main :: () {
     // Setting print_style to use newlines, so the data is more legible, 
     // and we can more easily compare to the re-serialized GON output below.
     context.print_style.default_format_struct.use_newlines_if_long_form = true;
+    context.print_style.default_format_struct.use_long_form_if_more_than_this_many_members = -1;
     
-    print("Behold, the things we parsed:\nthings: %\nfruit_facts: %\ncsv: %\n\n", things, fruit_facts, csv);
+    print("Behold, the things we parsed:\nthings: %\n\nfruit_facts: %\n\ncsv: %\n\n", things, fruit_facts, csv);
     
     
     
