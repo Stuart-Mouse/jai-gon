@@ -20,6 +20,17 @@ This module depends on my [Utils](https://github.com/Stuart-Mouse/jai-utils) and
 Sorry to make you go download more stuff, I really would prefer if I didn't need the dependencies, but it had become untennable to maintain all of the duplicated code across my modules.
 
 
+### Issue in Unicode.jai
+
+There appears to be small bug in Unicode.jai, which I believe has been emailed in, but has not yet been fixed,
+
+Simply replace lines 37 and 38 with the following to fix: (thanks smarimc)
+```
+(ch >  0x0000007F && ch <= 0x000007FF && continuation_bytes != 1) ||
+(ch >  0x000007FF && ch <= 0x0000FFFF && continuation_bytes != 2) ||
+```
+
+
 ## Motivation
 
 Most parsers for text-based data formats (like JSON, XML, etc.) really only do about half the job, 
