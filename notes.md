@@ -35,6 +35,12 @@ since then we could do something like just setting an object to allocate all ele
 but simply having a set_allocator_for_type proc would probabyl be more useful, or something like io_data structures
 
 
+## Issue in Unicode.jai
+
+replace lines 37 and 38 to fix: (thanks smarimc)
+          (ch >  0x0000007F && ch <= 0x000007FF && continuation_bytes != 1) ||
+          (ch >  0x000007FF && ch <= 0x0000FFFF && continuation_bytes != 2) ||
+
 
 
 ## Cleanup and Rewrite

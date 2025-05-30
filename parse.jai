@@ -1,13 +1,13 @@
 
 Parser :: struct {
-    tokenizer:  Lexer;
+    lexer:      Lexer;
     node_pool:  Flat_Pool;
     root_node:  *Node;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
     reset(*parser.node_pool, overwrite_memory = true);
-    init_lexer(*parser.tokenizer, file, file_path);
+    if file  init_lexer(*parser.lexer, file, file_path);
     
     // NOTE: We unfortunately do have to allocate this node in the pool, 
     //       otherwise its address could change if the parser gets passed around.
@@ -26,22 +26,48 @@ deinit_parser :: (using parser: *Parser) {
 
 // ========== Load and Parse ==========
 
-load_and_parse_file_with_bindings :: (file_path: string, bindings: ..Binding_With_Path) -> Parser, bool {
-    file, ok := read_entire_file(file_path);
-    if !ok  return .{}, false;
-    parser:, ok = parse_file(file, file_path);
-    return parser, ok;
+load_and_parse_file_with_bindings :: (file_path: string, bindings: ..Binding_With_Path) -> bool {
+    parser: Parser;
+    init_parser(*parser, "");
+    defer deinit_parser(*parser);
+    
+    file, ok := read_entire_file(file_path,, get_pool_allocator(*parser.node_pool));
+    if !ok  return false;
+    
+    init_lexer(*parser.lexer, file, file_path);
+    
+    ok = construct_dom(*parser);
+    if !ok  return false;
+    
+    ok = add_data_bindings(*parser, ..bindings);
+    if !ok  return false;
+    
+    ok = process_data_bindings(*parser);
+    if !ok  return false;
+    
+    return true;
 }
 
+// NOTE: user does not need to worry about freeing file, since we allocate it in the parser's pool.
 load_and_parse_file :: (file_path: string) -> Parser, bool {
-    file, ok := read_entire_file(file_path);
+    parser: Parser;
+    init_parser(*parser, "");
+    
+    ok: bool;
+    defer if !ok  deinit_parser(*parser);
+    
+    file:, ok = read_entire_file(file_path,, get_pool_allocator(*parser.node_pool));
     if !ok  return .{}, false;
-    parser:, ok = parse_file(file, file_path);
+    
+    init_lexer(*parser.lexer, file, file_path);
+    
+    ok = construct_dom(*parser);
+    if !ok  return .{}, false;
+    
     return parser, ok;
 }
 
-
-parse_file :: (file: string, file_path: string) -> Parser, bool {
+parse_file :: (file: string, file_path := "") -> Parser, bool {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom(*parser)  return .{}, false;
@@ -136,7 +162,7 @@ construct_dom :: (using parser: *Parser) -> bool {
         
         // read field name
         if parent.node_type != .ARRAY {
-            next_token = get_token(*tokenizer);
+            next_token = get_token(*lexer);
             if next_token.type == {
               case .IDENTIFIER; #through;
               case .NUMBER;     #through;
@@ -164,7 +190,7 @@ construct_dom :: (using parser: *Parser) -> bool {
             }
         }
         
-        next_token = get_token(*tokenizer);
+        next_token = get_token(*lexer);
         if next_token.type == .ERROR {
             log_unexepected_token(next_token);
             return false;
