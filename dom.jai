@@ -147,43 +147,47 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
     node.binding = binding;
     io_data := get_io_data(node.binding.type);
     
-    if node.binding.type.type == {
-      case .INTEGER; #through;
-      case .FLOAT;   #through;
-      case .STRING;  #through;
-      case .BOOL;  
+    if io_data && io_data.serialize_proc {
         node.node_type = .FIELD;
-        
-      case .ENUM;
-        ti_enum := node.binding.type.(*Type_Info_Enum);
-        if ti_enum.enum_type_flags & .FLAGS {
-            node.node_type = ifx node.parent && node.parent.binding.value_pointer == node.binding.value_pointer
-                             then .FIELD else .ARRAY;
-        }
-        else node.node_type = .FIELD;
-        
-      case .ARRAY;
-        // arrays of u8 are serialized as string
-        // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
-        ti_array := node.binding.type.(*Type_Info_Array);
-        if ti_array.element_type.runtime_size == 1 {
+    } else {
+        if node.binding.type.type == {
+          case .INTEGER; #through;
+          case .FLOAT;   #through;
+          case .STRING;  #through;
+          case .BOOL;  
             node.node_type = .FIELD;
-        }
-        // indexed arrays and arrays containing struct with defined name member will serialize as gon objects
-        else if io_data && (.ARRAY_INDEXED & io_data.flags) {
-            node.node_type = .OBJECT;
-        }
-        else if ti_array.element_type.type == .STRUCT {
-            element_io_data := get_io_data(ti_array.element_type);
-            if element_io_data && element_io_data.name_member {
+            
+          case .ENUM;
+            ti_enum := node.binding.type.(*Type_Info_Enum);
+            if ti_enum.enum_type_flags & .FLAGS {
+                node.node_type = ifx node.parent && node.parent.binding.value_pointer == node.binding.value_pointer
+                                 then .FIELD else .ARRAY;
+            }
+            else node.node_type = .FIELD;
+            
+          case .ARRAY;
+            // arrays of u8 are serialized as string
+            // we will probably distinguish this later on u8 vs byte, where byte is serialized using some binary data blob
+            ti_array := node.binding.type.(*Type_Info_Array);
+            if ti_array.element_type.runtime_size == 1 {
+                node.node_type = .FIELD;
+            }
+            // indexed arrays and arrays containing struct with defined name member will serialize as gon objects
+            else if io_data && (.ARRAY_INDEXED & io_data.flags) {
                 node.node_type = .OBJECT;
             }
+            else if ti_array.element_type.type == .STRUCT {
+                element_io_data := get_io_data(ti_array.element_type);
+                if element_io_data && element_io_data.name_member {
+                    node.node_type = .OBJECT;
+                }
+            }
+            else node.node_type = .ARRAY;
+            
+          case .STRUCT;
+            node.node_type = ifx io_data && (io_data.flags & .AS_ARRAY) 
+                             then .ARRAY else .OBJECT;
         }
-        else node.node_type = .ARRAY;
-        
-      case .STRUCT;
-        node.node_type = ifx io_data && (io_data.flags & .AS_ARRAY) 
-                         then .ARRAY else .OBJECT;
     }
     
     if node.node_type == .UNINITIALIZED {
@@ -195,23 +199,20 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
     if node.node_type == .OBJECT || node.node_type == .ARRAY {
         if node.binding.type.type == {
           case .STRUCT;
-            iterate_struct_members(node.binding, 
-                #code { 
-                    insert_data_node(parser, node, it_info.name, it); 
-                },
-                flags = .SKIP_CONSTANT | .SKIP_PLACE
-            );
+            iterate_struct_members(node.binding, .SKIP_CONSTANT | .SKIP_PLACE, #code {
+                insert_data_node(parser, node, it_info.name, it); 
+            });
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
             element_io_data := get_io_data(array.element_type);
             for array {
-                // TODO: better handling for indexed and object arrays using IO data
                 elem_name: string;
-                if element_io_data && element_io_data.name_member
-                    then Convert.any_to_any(elem_name, get_member_any(it.value_pointer, element_io_data.name_member));
-                    else elem_name = tprint("%", it_index);
-                insert_data_node(parser, node, elem_name, it);
+                if element_io_data && element_io_data.name_member {
+                    name_member := get_member(it, element_io_data.name_member);
+                    Convert.any_to_any(elem_name, name_member);
+                }
+                insert_data_node(parser, node, elem_name, it, .ALLOW_DUPLICATE);
             }
         }
     }

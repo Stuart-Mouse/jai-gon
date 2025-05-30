@@ -35,6 +35,12 @@ since then we could do something like just setting an object to allocate all ele
 but simply having a set_allocator_for_type proc would probabyl be more useful, or something like io_data structures
 
 
+## Issue in Unicode.jai
+
+replace lines 37 and 38 to fix: (thanks smarimc)
+          (ch >  0x0000007F && ch <= 0x000007FF && continuation_bytes != 1) ||
+          (ch >  0x000007FF && ch <= 0x0000FFFF && continuation_bytes != 2) ||
+
 
 
 ## Cleanup and Rewrite
@@ -67,10 +73,14 @@ Lexer improvements
 
 need to finish writing some basic test cases?
     at least need to manually test stuff again before publishing
+        need to test indexed arrays and enum-indexed arrays
+        need to test custom io data parsing and serialization procs
     
 try to remove some dependencies on Convert.jai and Utils module if possible?
     can't really, now that we use scanner.jai and just moved out set_value_form_string...
     just work on clarifying and organizing dependencies in the future
+
+
 
 
 
@@ -91,26 +101,12 @@ Another option, not really for GON, but for LSD with regard to field references 
 this put a little more burden on the script context o provide all the right bindings, but that's pretty much already the direction that LSD is going, so no biggie i think
 
 
-
-## Directives
-
-`#identifier(...)`
-
-Capture everything inside the parenthesis, considers matching inner pairs of parens ?
-    give the user the idrective parameters as one big string, or as an array of tokens?
-    doing tokens is probably the best option since once can always just pass a string to the directive
-
-What can directives do?
-    produce a typed value? 
-    modify previous/parent field?
-    modify parser state?
-    
     
     
 
 
 
-
+unfinished blog post thing:
 
 
 # Why use a DOM instead of SAX-style parsing?

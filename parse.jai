@@ -1,13 +1,13 @@
 
 Parser :: struct {
-    tokenizer:  Lexer;
+    lexer:      Lexer;
     node_pool:  Flat_Pool;
     root_node:  *Node;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
     reset(*parser.node_pool, overwrite_memory = true);
-    init_lexer(*parser.tokenizer, file, file_path);
+    if file  init_lexer(*parser.lexer, file, file_path);
     
     // NOTE: We unfortunately do have to allocate this node in the pool, 
     //       otherwise its address could change if the parser gets passed around.
@@ -26,22 +26,48 @@ deinit_parser :: (using parser: *Parser) {
 
 // ========== Load and Parse ==========
 
-load_and_parse_file_with_bindings :: (file_path: string, bindings: ..Binding_With_Path) -> Parser, bool {
-    file, ok := read_entire_file(file_path);
-    if !ok  return .{}, false;
-    parser:, ok = parse_file(file, file_path);
-    return parser, ok;
+load_and_parse_file_with_bindings :: (file_path: string, bindings: ..Binding_With_Path) -> bool {
+    parser: Parser;
+    init_parser(*parser, "");
+    defer deinit_parser(*parser);
+    
+    file, ok := read_entire_file(file_path,, get_pool_allocator(*parser.node_pool));
+    if !ok  return false;
+    
+    init_lexer(*parser.lexer, file, file_path);
+    
+    ok = construct_dom(*parser);
+    if !ok  return false;
+    
+    ok = add_data_bindings(*parser, ..bindings);
+    if !ok  return false;
+    
+    ok = process_data_bindings(*parser);
+    if !ok  return false;
+    
+    return true;
 }
 
+// NOTE: user does not need to worry about freeing file, since we allocate it in the parser's pool.
 load_and_parse_file :: (file_path: string) -> Parser, bool {
-    file, ok := read_entire_file(file_path);
+    parser: Parser;
+    init_parser(*parser, "");
+    
+    ok: bool;
+    defer if !ok  deinit_parser(*parser);
+    
+    file:, ok = read_entire_file(file_path,, get_pool_allocator(*parser.node_pool));
     if !ok  return .{}, false;
-    parser:, ok = parse_file(file, file_path);
+    
+    init_lexer(*parser.lexer, file, file_path);
+    
+    ok = construct_dom(*parser);
+    if !ok  return .{}, false;
+    
     return parser, ok;
 }
 
-
-parse_file :: (file: string, file_path: string) -> Parser, bool {
+parse_file :: (file: string, file_path := "") -> Parser, bool {
     parser: Parser;
     init_parser(*parser, file);
     if !construct_dom(*parser)  return .{}, false;
@@ -98,7 +124,7 @@ process_node_binding :: (using parser: *Parser, node: *Node) -> resolved: bool {
         
         io_data := get_io_data(node.binding.type);
         if io_data && io_data.parse_proc {
-            if io_data.parse_proc(node.binding, node.value) {
+            if !io_data.parse_proc(node.binding, node.value) {
                 log_binding_error(node, "parse_proc failed.");
                 return false;
             }
@@ -136,7 +162,7 @@ construct_dom :: (using parser: *Parser) -> bool {
         
         // read field name
         if parent.node_type != .ARRAY {
-            next_token = get_token(*tokenizer);
+            next_token = get_token(*lexer);
             if next_token.type == {
               case .IDENTIFIER; #through;
               case .NUMBER;     #through;
@@ -164,7 +190,7 @@ construct_dom :: (using parser: *Parser) -> bool {
             }
         }
         
-        next_token = get_token(*tokenizer);
+        next_token = get_token(*lexer);
         if next_token.type == .ERROR {
             log_unexepected_token(next_token);
             return false;
@@ -291,7 +317,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             element_is_struct := array.element_type.type == .STRUCT;
             element_has_name  := element_io_data != null && element_io_data.name_member != null;
             
-            if element_is_struct && !element_has_name {
+            if !is_indexed && element_is_struct && !element_has_name {
                 log_binding_error(node, "GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");
                 return false;
             }
@@ -305,9 +331,9 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 min_index, max_index := S64_MAX, S64_MIN;
                 if io_data.enum_index_type {
                     for node.children {
-                        index, ok := enum_name_to_value(xx io_data.enum_index_type, node.name);
+                        index, ok := enum_name_to_value(xx io_data.enum_index_type, it.name);
                         if !ok {
-                            log_binding_error(node, "unable to parse enum value from string: %", node.name);
+                            log_binding_error(it, "unable to parse enum value from string: %", it.name);
                             return false;
                         }
                         min_index = min(min_index, index);
@@ -315,9 +341,9 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                 } else {
                     for node.children {
-                        index, ok, remainder := to_integer(node.name);
+                        index, ok, remainder := to_integer(it.name);
                         if !ok || remainder {
-                            log_binding_error(node, "unable to parse integer from string: %", node.name);
+                            log_binding_error(it, "unable to parse integer from string: %", it.name);
                             return false;
                         }
                         min_index = min(min_index, index);
@@ -350,13 +376,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 
                 if io_data.enum_index_type {
                     for node.children {
-                        index := enum_name_to_value(xx io_data.enum_index_type, node.name);
-                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                        index := enum_name_to_value(xx io_data.enum_index_type, it.name);
+                        if !add_data_binding_to_node(it, array[index])  return false;
                     }
                 } else {
                     for node.children {
-                        index := to_integer(node.name);
-                        if !add_data_binding_to_node(it, array[it_index])  return false;
+                        index := to_integer(it.name);
+                        if !add_data_binding_to_node(it, array[index])  return false;
                     }
                 }
                 

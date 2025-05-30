@@ -3,84 +3,15 @@
 #import "Math";
 #import "Reflection";
 
+#import "GON";
 #import "Utils";
 Convert :: #import "Convert";
 
-#import "GON"()();
-
-Thing :: struct {
-    name:       string;
-    numbers:    [5] int;
-    fraction:   float;
-    text:       string;
-    flags:      Flags;
-    fruit:      Fruits;
-}
-
-Flags :: enum_flags {
-    FIRST;
-    SECOND;
-    THIRD;
-}
-
-Fruits :: enum {
-    APPLE;
-    PEAR;
-    BANANA;
-    STRAWBERRY;
-    KIWI;
-}
 
 main :: () {
     // UA :: #import "Unmapping_Allocator";
     // context.allocator = UA.get_unmapping_allocator();
     {
-        #if true {
-            things: [] Thing;
-            defer {
-                for *things {
-                    free(it.text);
-                    free(it.name);
-                }
-                array_free(things);
-            }
-            
-            add_io_data(Thing, .{
-                name_member = get_field(type_info(Thing), "name"),
-                flags = .SKIP_ELEMS_IF_EMPTY
-            });
-            
-            file, ok := read_entire_file("test.gon");
-            defer free(file);
-            if !ok return;
-            
-            parser:, ok = parse_file(file);
-            defer deinit_parser(*parser);
-            if !ok return;
-            
-            add_data_binding(*parser, things, "things");
-            
-            if !process_data_bindings(*parser) {
-                log("failed to process data bindings");
-                return;
-            }
-            
-            {
-                serializer: Parser;
-                init_parser(*serializer, "");
-                insert_data_node(*serializer, null, "things", things);
-                
-                output, ok := serialize_to_string(*serializer);
-                // output, ok := serialize_to_string(*parser);
-                defer free(output);
-                if ok  print("%\n", output);
-                
-                write_entire_file("test_output.gon", output);
-            }
-            
-            print("%\n", things);
-        }
-        
         // test cases
         #if true {
             {
@@ -129,7 +60,6 @@ main :: () {
                 test_parse_number("0x200");
             }
             
-            // TODO: generate table of string values for integer max/min sizes and numbers just outside of ranges
             // test all integer test limits of range, inside and out
             for NUMBER_LIMITS {
                 info := it.type.(*Type_Info_Integer);
@@ -151,20 +81,6 @@ main :: () {
                 log("\tmin-1");   test(info, it.min_minus_one, false);
                 log("\tmax");     test(info, it.max,           true);
                 log("\tmax+1");   test(info, it.max_plus_one,  false);
-                
-                // if info.signed {
-                //     // low, high := signed_integer_range_from_size(info.runtime_size);
-                //     log("TEST % min",   type); assert(set_value_from_string(to_any(*number), tprint("%", it.min          ) == true );
-                //     log("TEST % min-1", type); assert(set_value_from_string(to_any(*number), tprint("%", it.min_minus_one) == false);
-                //     log("TEST % max",   type); assert(set_value_from_string(to_any(*number), tprint("%", it.max          ) == true );
-                //     log("TEST % max+1", type); assert(set_value_from_string(to_any(*number), tprint("%", it.max_plus_one ) == false);
-                // } else {
-                //     // low, high := unsigned_integer_range_from_size(info.runtime_size);
-                //     log("TEST % min",   type); assert(set_value_from_string(to_any(*number), tprint("%",  it.min          ) == true );
-                //     log("TEST % min-1", type); assert(set_value_from_string(to_any(*number), tprint("%",  it.min_minus_one) == false);
-                //     log("TEST % max",   type); assert(set_value_from_string(to_any(*number), tprint("%",  it.max          ) == true );
-                //     log("TEST % max+1", type); assert(set_value_from_string(to_any(*number), tprint("%",  it.max_plus_one ) == false);
-                // }
             }
             
             // test float and double
@@ -210,7 +126,9 @@ main :: () {
 }
 
 
-
+/*
+    Using the string values for all the numbers here is maybe kind of silly, but hey it works...
+*/
 NUMBER_LIMITS :: struct { 
     type:           Type;
     min:            string;
