@@ -168,8 +168,8 @@ main :: () {
     // For compactness, serialize the elements in GON array format.
     add_io_data(type_of(fruit_facts[0]), .{ flags = .AS_ARRAY, });
     
-        
-        
+    
+    
     /*
         Custom parsing and serialization procs.
         This is a bit of a contrived example, but I wanted to keep it simple.
