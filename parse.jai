@@ -469,9 +469,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 raw_array    := node.binding.value_pointer.(*Resizable_Array);
                 count_before := raw_array.count;
                 
-                array_reserve(raw_array, count_before + node.children.count, array.element_type.runtime_size);
-                raw_array.count += node.children.count;
-                
+                array_resize(array, count_before + node.children.count, array.element_type.runtime_size, true);
                 for node.children {
                     if !add_data_binding_to_node(it, array[it_index])  return false;
                 }
