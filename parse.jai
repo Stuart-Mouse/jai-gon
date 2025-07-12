@@ -358,7 +358,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 }
                 if array.array_type == {
                   case .RESIZABLE;
-                    resize(array, max_index);
+                    resize(array, max_index, true);
                     
                   case .FIXED; #through;
                   case .VIEW;
@@ -390,7 +390,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 count, data := get_count_and_data(array);
                 if array.array_type == {
                   case .RESIZABLE;
-                    resize(array, node.children.count + count);
+                    resize(array, node.children.count + count, true);
                     
                   case .FIXED; #through;
                   case .VIEW;
@@ -469,7 +469,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 raw_array    := node.binding.value_pointer.(*Resizable_Array);
                 count_before := raw_array.count;
                 
-                resize(array, count_before + node.children.count, array.element_type.runtime_size, true);
+                resize(array, count_before + node.children.count, true);
                 for node.children {
                     if !add_data_binding_to_node(it, array[it_index])  return false;
                 }
