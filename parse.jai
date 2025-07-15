@@ -1,12 +1,22 @@
 
 Parser :: struct {
     lexer:      Lexer;
-    node_pool:  Flat_Pool;
+    #if USING_FLAT_POOL { 
+        node_pool: Flat_Pool; 
+    } else { 
+        node_pool: Pool; 
+    }
     root_node:  *Node;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
-    reset(*parser.node_pool, overwrite_memory = true);
+    #if USING_FLAT_POOL { 
+        reset(*parser.node_pool, overwrite_memory = true);
+    } else { 
+        reset(*parser.node_pool);
+        set_allocators(*parser.node_pool);
+    }
+    
     if file  init_lexer(*parser.lexer, file, file_path);
     
     // NOTE: We unfortunately do have to allocate this node in the pool, 
@@ -20,7 +30,11 @@ init_parser :: (parser: *Parser, file: string, file_path := "") {
 }
 
 deinit_parser :: (using parser: *Parser) {
-    fini(*node_pool);
+    #if USING_FLAT_POOL { 
+        fini(*node_pool);
+    } else { 
+        release(*node_pool);
+    }
 }
 
 
@@ -281,7 +295,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     }
     
     defer if name_member {
-        return Convert.any_to_any(name_member_any, node.name);
+        if !Convert.any_to_any(name_member_any, node.name)  return false;
     }
     
     // TODO: think about whether we want to reimplement pointer dereferencing stuff
@@ -530,7 +544,8 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
         }
         
       case;
-        // TODO: invalid node type error?
+        log_binding_error(node, "invalid node type: %", node.node_type);
+        return false;
     }
     
     return true;
@@ -554,5 +569,15 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
     } 
     
     return Convert.set_value_from_string(value, text, should_copy_strings);
+}
+
+#if USING_FLAT_POOL {
+    get_pool_allocator :: (pool: *Flat_Pool) -> Allocator {
+        return .{ flat_pool_allocator_proc, pool };
+    }
+} else {
+    get_pool_allocator :: (pool: *Pool) -> Allocator {
+        return .{ pool_allocator_proc, pool };
+    }
 }
 
