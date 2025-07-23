@@ -1,21 +1,13 @@
 
 Parser :: struct {
     lexer:      Lexer;
-    #if USING_FLAT_POOL { 
-        node_pool: Flat_Pool; 
-    } else { 
-        node_pool: Pool; 
-    }
+    node_pool:  Flat_Pool; 
     root_node:  *Node;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
-    #if USING_FLAT_POOL { 
-        reset(*parser.node_pool, overwrite_memory = true);
-    } else { 
-        reset(*parser.node_pool);
-        set_allocators(*parser.node_pool);
-    }
+    reset(*parser.node_pool, overwrite_memory = true);
+    init(*parser.node_pool);
     
     if file  init_lexer(*parser.lexer, file, file_path);
     
@@ -30,11 +22,7 @@ init_parser :: (parser: *Parser, file: string, file_path := "") {
 }
 
 deinit_parser :: (using parser: *Parser) {
-    #if USING_FLAT_POOL { 
-        fini(*node_pool);
-    } else { 
-        release(*node_pool);
-    }
+    fini(*node_pool);
 }
 
 
@@ -571,13 +559,7 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
     return Convert.set_value_from_string(value, text, should_copy_strings);
 }
 
-#if USING_FLAT_POOL {
-    get_pool_allocator :: (pool: *Flat_Pool) -> Allocator {
-        return .{ flat_pool_allocator_proc, pool };
-    }
-} else {
-    get_pool_allocator :: (pool: *Pool) -> Allocator {
-        return .{ pool_allocator_proc, pool };
-    }
+get_pool_allocator :: (pool: *Flat_Pool) -> Allocator {
+    return .{ flat_pool_allocator_proc, pool };
 }
 
