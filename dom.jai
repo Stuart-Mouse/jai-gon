@@ -374,16 +374,3 @@ path_next :: (path: string) -> (next: string, remaining: string, ok: bool) {
     return left, right, true;
 }
 
-
-// helper function that I may remove if I go back to just flagging the node...
-is_indexed_array :: (node: *Node) -> bool {
-    if node == null
-    || node.node_type != .OBJECT 
-    || node.binding.type == null 
-    || node.binding.type.type != .ARRAY  
-        return false;
-    
-    io_data := get_io_data(node.binding.type);
-    return io_data && (io_data.flags & .ARRAY_INDEXED).(bool);
-}
-

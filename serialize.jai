@@ -141,7 +141,8 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags: Se
             
             unmatched := flags_total & ~flags_printed;
             if unmatched {
-                if !first  append(builder, ", 0x");
+                if !first  append(builder, ", ");
+                append(builder, "0x");
                 format := FormatInt.{base=16};
                 print_u64_base_n(builder, unmatched, format);
             }

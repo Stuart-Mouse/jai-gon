@@ -277,13 +277,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
         }
     }
     
-    // name_member would conflict with indexing, so index takes precedence
-    if is_indexed_array(node.parent) {
-        name_member = null;
-    }
-    
     defer if name_member {
-        if !Convert.any_to_any(name_member_any, node.name)  return false;
+        name_member_io_data := get_io_data(name_member_any.type);
+        if name_member_io_data && name_member_io_data.parse_proc {
+            return name_member_io_data.parse_proc(name_member_any, node.name);
+        } else {
+            return Convert.any_to_any(name_member_any, node.name);
+        }
     }
     
     // TODO: think about whether we want to reimplement pointer dereferencing stuff
@@ -309,11 +309,13 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 if !add_data_binding_to_node(it, member_any)  return false;
             }
             
+            // we don't want to set the name member if the parent exists and is an indexed array, because then the gon name is being used for the index
+            if node.parent && (node.parent.field_flags & .ARRAY_INDEXED) then name_member = null;
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
             
-            is_indexed := io_data != null && (.ARRAY_INDEXED & io_data.flags) != 0;
+            is_indexed := io_data != null && has_all_flags(io_data.flags, .ARRAY_INDEXED);
             
             element_io_data   := get_io_data(array.element_type);
             element_is_struct := array.element_type.type == .STRUCT;
@@ -390,9 +392,15 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 
             } else {
                 count, data := get_count_and_data(array);
+                
+                // NOTE: we apply an offset to the index used for child bindings when we are 
+                //       dealing with a resizable array which already contains some elements
+                index_offset := 0; 
+                
                 if array.array_type == {
                   case .RESIZABLE;
                     resize(array, node.children.count + count, true);
+                    index_offset = count;
                     
                   case .FIXED; #through;
                   case .VIEW;
@@ -407,7 +415,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     }
                 }
                 for node.children {
-                    if !add_data_binding_to_node(it, array[it_index])  return false;
+                    if !add_data_binding_to_node(it, array[index_offset + it_index])  return false;
                 }
             }
             
@@ -443,9 +451,14 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                 log_binding_error(node, "GON array contains more elements than can be mapped to the struct members of type: %", as_type(ti_struct));
                 return false;
             }
+            
+            last_member_offset := -1;
             for node.children {
-                // TODO: will need to to more work here to handle constant struct members
-                member := ti_struct.members[it_index];
+                member := struct_info.members[it_index];
+                if member.flags & .CONSTANT  continue;
+                if member.offset_in_bytes < last_member_offset  break;
+                last_member_offset = member.offset_in_bytes;
+                
                 member_any := Any.{ member.type, node.binding.value_pointer + member.offset_in_bytes };
                 if !add_data_binding_to_node(it, member_any)  return false;
             }
@@ -453,7 +466,11 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
-            if array.array_type == .RESIZABLE {
+            count, data := get_count_and_data(array);
+            index_offset: int; // for dynamic array case, where we want to leave the existing items untouched
+            
+            if array.array_type == {
+              case .RESIZABLE;
                 /*
                     IMPORTANT NOTE: 
                     It is critical that the proper amount of space is pre-allocated for the dynamic array 
@@ -468,30 +485,28 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     actually need to separate the making and evaluation of data bindings when we aren't concerned with field references.
                     But, until I am sure that I won't be adding those back in, we're stuck in limbo.
                 */
-                raw_array    := node.binding.value_pointer.(*Resizable_Array);
-                count_before := raw_array.count;
-                
                 resize(array, count_before + node.children.count, true);
-                for node.children {
-                    if !add_data_binding_to_node(it, array[it_index])  return false;
-                }
-            } else {
-                count, data := get_count_and_data(array);
-                if data {
-                    if node.children.count > count {
-                        log_binding_error(node, "bounds check failed on array or slice.");
-                        return false;
-                    }
-                } else if array.array_type == .VIEW {
+                index_offset = count;
+                
+              case .VIEW;
+                if data == null {
                     assert(count == 0);
                     resize(array, node.children.count);
+                    count = node.children.count; // @HACK: doing this because we read count in the .FIXED case below
                 }
+                #through;
                 
-                for node.children {
-                    if !add_data_binding_to_node(it, array[it_index])  return false;
+              case .FIXED;
+                if node.children.count > count {
+                    log_binding_error(node, "bounds check failed on array or slice.");
+                    return false;
                 }
             }
             
+            count, data = get_count_and_data(array);
+            for node.children {
+                if !add_data_binding_to_node(it, array[index_offset + it_index])  return false;
+            }
             
           case;
             log_binding_error(node, "GON array cannot be bound to type: %", as_type(node.binding.type));
