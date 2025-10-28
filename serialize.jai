@@ -36,14 +36,15 @@ serialize_to_builder :: (using parser: *Parser, builder: *String_Builder) -> boo
 */
 
 Serialize_Flags :: enum_flags {
-    SAME_LINE;
+    NONE :: 0
+    SAME_LINE :: 1;
     SKIP_IF_EMPTY;
     IN_ARRAY;
     IN_INDEXED_ARRAY;
     IS_FIRST_CHILD;
 }
 
-serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags: Serialize_Flags = xx 0, enum_index_type: *Type_Info = null) -> bool {
+serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := Serialize_Flags.NONE, enum_index_type: *Type_Info = null) -> bool {
     if node == null  return false;
     
     io_data := get_io_data(node.binding.type);

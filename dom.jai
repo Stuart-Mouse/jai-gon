@@ -173,7 +173,7 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
                 node.node_type = .FIELD;
             }
             // indexed arrays and arrays containing struct with defined name member will serialize as gon objects
-            else if io_data && (.ARRAY_INDEXED & io_data.flags) {
+            else if io_data && io_data.flags & .ARRAY_INDEXED {
                 node.node_type = .OBJECT;
             }
             else if ti_array.element_type.type == .STRUCT {
