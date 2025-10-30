@@ -16,7 +16,7 @@ IO_Data :: struct {
     
     bind_proc:      (Any) -> Any;
     parse_proc:     (value: Any, text: string) -> bool;
-    serialize_proc: (value: Any) -> string, bool;
+    serialize_proc: (value: Any) -> bool, string;
     
     flags: Flags;
     

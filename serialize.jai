@@ -194,7 +194,7 @@ append_gon_string :: (builder: *String_Builder, text: string, quote_char: u8 = "
 append_field_value :: (builder: *String_Builder, value: Any) -> bool {
     io_data := get_io_data(value.type);
     if io_data && io_data.serialize_proc {
-        string_value, ok := io_data.serialize_proc(value);
+        ok, string_value := io_data.serialize_proc(builder, value);
         append_gon_string(builder, string_value);
         return ok;
     }

@@ -188,13 +188,13 @@ main :: () {
         return true;
     }
     
-    csv_to_string :: (val: Any) -> string, bool {
+    csv_to_string :: (val: Any) -> bool, string {
         assert(val.type == xx CSV);
         csv := val.value_pointer.(*CSV);
         
         // We allocate the output string with temp since GON won't free it for us.
         str := join(..csv.*, separator = ",",, temp);
-        return str, true;
+        return true, str;
     }
     
     csv: CSV;
