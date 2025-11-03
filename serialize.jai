@@ -36,7 +36,7 @@ serialize_to_builder :: (using parser: *Parser, builder: *String_Builder) -> boo
 */
 
 Serialize_Flags :: enum_flags {
-    NONE :: 0
+    NONE :: 0;
     SAME_LINE :: 1;
     SKIP_IF_EMPTY;
     IN_ARRAY;
@@ -99,8 +99,8 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := 
         // special case for serializing enum flags
         // we ignore child nodes and just write the array of flags values directly
         if node.binding.type && node.binding.type.type == .ENUM {
-            ti_enum := node.binding.type.(*Type_Info_Enum);
-            assert(ti_enum.enum_type_flags & .FLAGS == .FLAGS); 
+            enum_info := node.binding.type.(*Type_Info_Enum);
+            assert(enum_info.enum_type_flags & .FLAGS == .FLAGS); 
             same_line = true; // currently always on one line
             
             // NOTE: the below logic for printing the enum_flags values has been copied from Print.jai
@@ -110,8 +110,8 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := 
             if target_value == 0 {
                 // Check for a named 0-value before printing 0.
                 name := "0";
-                for ti_enum.values  if it == 0 {
-                    name = ti_enum.names[it_index];
+                for enum_info.values  if it == 0 {
+                    name = enum_info.names[it_index];
                     break;
                 }
                 
@@ -124,7 +124,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := 
             flags_printed : u64 = 0;
 
             first := true;
-            for ti_enum.values {
+            for enum_info.values {
                 value := cast(u64) it;
                 matching := flags_total & value;
                 if matching != value  matching = 0;  // We need to match all of the bits in the enum member.
@@ -136,7 +136,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := 
 
                 if first  append(builder, " ");
                 else      append(builder, ", ");
-                append(builder, ti_enum.names[it_index]);
+                append(builder, enum_info.names[it_index]);
                 first = false;
             }
             
@@ -201,8 +201,6 @@ append_field_value :: (builder: *String_Builder, value: Any) -> bool {
     
     if value.type.type == {
       case .STRING;
-        // always enclose in quotes and escape any characters which need to be escaped
-        // for GON we really should only need to escape quotation marks and backslashes
         append_gon_string(builder, value.value_pointer.(*string).*);
         
       case .INTEGER;    #through;
@@ -211,20 +209,19 @@ append_field_value :: (builder: *String_Builder, value: Any) -> bool {
         print(builder, "%", value);
         
       case .ENUM;
-        // assert not enum_flags
-        ti_enum := value.type.(*Type_Info_Enum);
-        assert(ti_enum.enum_type_flags & .FLAGS == 0);
+        enum_info := value.type.(*Type_Info_Enum);
+        assert(enum_info.enum_type_flags & .FLAGS == 0);
         print(builder, "%", value);
         
       case .STRUCT;
         log("Error: unable to serialize struct as GON field without a custom serialization proc.");
         
       case .ARRAY;
-        ti_array := value.type.(*Type_Info_Array);
-        assert(ti_array.element_type.runtime_size == 1);
+        array_info := value.type.(*Type_Info_Array);
+        assert(array_info.element_type.runtime_size == 1);
         
-        array_count, array_data := get_array_count_and_data(ti_array, value.value_pointer);
-        append_gon_string(builder, string.{ array_count, array_data });
+        count, data := get_array_count_and_data(array_info, value.value_pointer);
+        append_gon_string(builder, string.{ count, data });
     }
     return true;
 }

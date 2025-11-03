@@ -310,7 +310,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             }
             
             // we don't want to set the name member if the parent exists and is an indexed array, because then the gon name is being used for the index
-            if node.parent && (node.parent.field_flags & .ARRAY_INDEXED) then name_member = null;
+            // if node.parent && (node.parent.flags & .ARRAY_INDEXED) then name_member = null;
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
@@ -445,10 +445,10 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
             
             
           case .STRUCT;
-            ti_struct := node.binding.type.(*Type_Info_Struct);
+            struct_info := node.binding.type.(*Type_Info_Struct);
 
-            if node.children.count > ti_struct.members.count {
-                log_binding_error(node, "GON array contains more elements than can be mapped to the struct members of type: %", as_type(ti_struct));
+            if node.children.count > struct_info.members.count {
+                log_binding_error(node, "GON array contains more elements than can be mapped to the struct members of type: %", as_type(struct_info));
                 return false;
             }
             
@@ -485,7 +485,7 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
                     actually need to separate the making and evaluation of data bindings when we aren't concerned with field references.
                     But, until I am sure that I won't be adding those back in, we're stuck in limbo.
                 */
-                resize(array, count_before + node.children.count, true);
+                resize(array, count + node.children.count, true);
                 index_offset = count;
                 
               case .VIEW;
