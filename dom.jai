@@ -199,7 +199,7 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
     if node.node_type == .OBJECT || node.node_type == .ARRAY {
         if node.binding.type.type == {
           case .STRUCT;
-            iterate_struct_members(node.binding, .SKIP_CONSTANT | .SKIP_PLACE, #code {
+            iterate_struct_members(node.binding, .SKIP_CONSTANT | .SKIP_OVERLAY, #code {
                 insert_data_node(parser, node, it_info.name, it); 
             });
             
@@ -368,9 +368,9 @@ format_node_path :: (builder: *String_Builder, node: *Node) {
     The procedure does not currently do anything special to validate the content of the string, but perhaps we should?
     The caller will also have to check if the path is absolute or relative manually before they start splitting the path.
 */
-path_next :: (path: string) -> (next: string, remaining: string, ok: bool) {
+path_next :: (path: string) -> (next: string, remaining: string) {
     found, left, right := split_from_left_by_any(path, "/\\");
-    if !found  return path, "", true;
-    return left, right, true;
+    if !found  return path, "";
+    return left, right;
 }
 
