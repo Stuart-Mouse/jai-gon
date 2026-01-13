@@ -4,7 +4,6 @@
 #scope_module
 
 #import "Basic";
-#import "Reflection";
 #import "String";
 #import "File";
 #import "Math";
