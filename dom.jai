@@ -199,9 +199,10 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
     if node.node_type == .OBJECT || node.node_type == .ARRAY {
         if node.binding.type.type == {
           case .STRUCT;
-            iterate_struct_members(node.binding, .SKIP_CONSTANT | .SKIP_OVERLAY, #code {
-                insert_data_node(parser, node, it_info.name, it); 
-            });
+            structure := Any_Structure.from(node.binding);
+            for structure {
+                insert_data_node(parser, node, it_info.name, it);
+            }
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
