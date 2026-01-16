@@ -95,7 +95,7 @@ main :: () {
     // Assigning a name member to the `Thing` struct will tell the parser to assign the name of the GON object to which the struct is bound to this particular member.
     // The SKIP_ELEMS_IF_EMPTY flag will prevent serialization of any struct members which are zero-valued.
     add_io_data(Thing, .{
-        name_member = get_field(type_info(Thing), "name"),
+        name_member = "name",
         flags       = .SKIP_ELEMS_IF_EMPTY
     });
     
@@ -161,12 +161,12 @@ main :: () {
     };
     
     add_io_data(type_of(fruit_facts), .{
-        flags = .ARRAY_INDEXED,
+        flags = .IS_INDEXED_ARRAY,
         enum_index_type = xx Fruits
     });
     
     // For compactness, serialize the elements in GON array format.
-    add_io_data(type_of(fruit_facts[0]), .{ flags = .AS_ARRAY, });
+    add_io_data(type_of(fruit_facts[0]), .{ flags = .SERIALIZE_AS_ARRAY, });
     
     
     

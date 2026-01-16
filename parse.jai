@@ -259,30 +259,31 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     }
     node.binding = binding;
     
-    name_member:      *Type_Info_Struct_Member;
-    name_member_any:  Any;
+    name_member:  Any;
     
     io_data := get_io_data(node.binding.type);
-    if io_data {
-        // because we may rebind the node, we need to assign the name_member_any ahead of time
+    if node.name && io_data {
+        // because we may rebind the node, we need to assign the name_member ahead of time
         // if this Any is still set after making bindings to child nodes, then we will assign to it
         if io_data.name_member {
-            name_member = io_data.name_member;
-            name_member_any = Any.{ name_member.type, node.binding.value_pointer + name_member.offset_in_bytes };
+            _, name_member = get_struct_member(binding, io_data.name_member, recursive = true);
         }
         
         if io_data.bind_proc {
             node.binding = io_data.bind_proc(node.binding);
+            if node.binding.value_pointer == null {
+                return false;
+            }
             io_data = get_io_data(node.binding.type);
         }
     }
     
-    defer if name_member {
-        name_member_io_data := get_io_data(name_member_any.type);
+    defer if name_member.type {
+        name_member_io_data := get_io_data(name_member.type);
         if name_member_io_data && name_member_io_data.parse_proc {
-            return name_member_io_data.parse_proc(name_member_any, node.name);
+            return name_member_io_data.parse_proc(name_member, node.name);
         } else {
-            return Convert.any_to_any(name_member_any, node.name);
+            return Convert.any_to_any(name_member, node.name);
         }
     }
     
@@ -298,28 +299,34 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
       case .OBJECT;
         if binding.type.type == {
           case .STRUCT;
+            structure := Any_Structure.from(binding);
             for node.children {
-                member := get_field(xx node.binding.type, it.name);
-                if !member || (member.flags & .CONSTANT)  continue;
+                found, member, info := get_member(structure, it.name, recursive = true);
+                if !found || info.flags & .CONSTANT  continue;
                 
-                // we don't want to set it if the name member has a binding to a child node
-                if member == name_member then name_member = null;
+                // we don't want to set the name member if the name member has a binding to a child node
+                // TODO: If we allow name member to be accessed through a using (which we likely want to do), then we have a problem here.
+                //       We can't set the name twice because we will be overwriting whatever string is already there, which is potentially causing a leak of that string.
+                //       So, then we have to decide whether to just assume that we can free whatever string is already present (if one is), or we have to track which strings we allocated, so we know not to overwrite them...
+                //       OR, we just say fuck it and if the user sets the name twice, then they just cause a leak...
+                //       also, the name member is not necessarily a string, so we also can't just check if its non-null and just leave it be
+                //       This is probably just a problem with using and multiple bindings generally. I am not sure if there's any good way that we can check that fields are not doubly bound or assigned through using...
+                if member.value_pointer == name_member.value_pointer then name_member = Any.{};
                 
-                member_any := Any.{ member.type, node.binding.value_pointer + member.offset_in_bytes };
-                if !add_data_binding_to_node(it, member_any)  return false;
+                if !add_data_binding_to_node(it, member)  return false;
             }
             
             // we don't want to set the name member if the parent exists and is an indexed array, because then the gon name is being used for the index
-            // if node.parent && (node.parent.flags & .ARRAY_INDEXED) then name_member = null;
+            // if node.parent && (node.parent.flags & .IS_INDEXED_ARRAY) then name_member = Any.{};
             
           case .ARRAY;
             array := Any_Array.from(node.binding);
             
-            is_indexed := io_data != null && has_all_flags(io_data.flags, .ARRAY_INDEXED);
+            is_indexed := io_data != null && has_all_flags(io_data.flags, .IS_INDEXED_ARRAY);
             
             element_io_data   := get_io_data(array.element_type);
             element_is_struct := array.element_type.type == .STRUCT;
-            element_has_name  := element_io_data != null && element_io_data.name_member != null;
+            element_has_name  := element_io_data != null && element_io_data.name_member != "";
             
             if !is_indexed && element_is_struct && !element_has_name {
                 log_binding_error(node, "GON object with binding to array of structs must contain a struct type with a defined IO_Data name member.");

@@ -5,13 +5,11 @@
 
 IO_Data :: struct {
     // for structs only
-    name_member:        *Type_Info_Struct_Member;
-    map_key_member:     *Type_Info_Struct_Member;
-    member_data:        [] struct { member: *Type_Info_Struct_Member; io_data: IO_Data; };
+    name_member: string;
     
     // for arrays only
     // can be used to index any array using an enum name
-    enum_index_type:    *Type_Info_Enum;
+    enum_index_type: *Type_Info_Enum;
     
     
     bind_proc:      (Any) -> Any;
@@ -21,24 +19,10 @@ IO_Data :: struct {
     flags: Flags;
     
     Flags :: enum_flags {
-        // the struct member or data type will be skipped during serialization if 0-valued
-        // arrays will also be skipped if all elements are 0-valued
-        // elements within indexed arrays will also be skipped if 0-valued
         SKIP_IF_EMPTY;
-        
-        // TODO: we should probaly replace SKIP_ELEMS_IF_EMPTY functionality on structs with SKIP_MEMBERS_WITH_DEFAULT_VALUES functionality. This would be more useful.
-        //       the only issue is that we would need to dynamically construct a default-intiialized instance to compare to, which would be slow. 
-        
-        // will skip array elems or struct members if they are empty
-        // will not skip the array/object itself due to being empty, you would just get "array []" or "object {}"
         SKIP_ELEMS_IF_EMPTY;
-        
-        // serializes a struct as though it were an array, binding to fields by index rather than by name
-        // this should only be used if the structure is stable, as changing the order of fields would cause parsing issues across program versions  
-        AS_ARRAY;
-        
-        // serializes an array as a GON object, using the index of each element as the name for the object
-        ARRAY_INDEXED;
+        SERIALIZE_AS_ARRAY;
+        IS_INDEXED_ARRAY;
     }
 }
 
@@ -49,27 +33,54 @@ add_io_data :: inline (type: Type, io_data: IO_Data) {
 }
 
 add_io_data :: (type: *Type_Info, io_data: IO_Data) {
-    for *IO_Data_Lookup
+    // basic validation before adding io_data, so that we don't need to check later...
+    _io_data := io_data;
+    base_type := get_variant_base_type(type);
+    if _io_data.name_member && base_type.type != .STRUCT {
+        log("Warning: cannot set a name member in io data for on a non-struct type.");
+        _io_data.name_member = "";
+    }
+    if _io_data.enum_index_type && base_type.type != .ARRAY {
+        log("Warning: cannot set an enum index type in io data for a non-array type.");
+        _io_data.enum_index_type = null;
+    }
+    
+    for *IO_Data_Lookup {
         if it.type == type {
-            it.io_data = io_data;
+            it.io_data = _io_data;
             return;
         }
+    }
     
-    array_add(*IO_Data_Lookup, .{ type, io_data });
+    array_add(*IO_Data_Lookup, .{ type, _io_data });
 }
 
-get_io_data :: inline (type: *Type_Info) -> *IO_Data {
-    for *IO_Data_Lookup
-        if it.type == type
-            return *it.io_data;
+get_io_data :: (type: *Type_Info) -> *IO_Data {
+    if type == null  return null;
+    
+    // search io data, repeating if type is a variant
+    while true {
+        for *IO_Data_Lookup {
+            if it.type == type {
+                return *it.io_data;
+            }
+        }
+        if type.type == .VARIANT {
+            type = type.(*Type_Info_Variant).variant_of;
+            continue;
+        }
+        break;
+    }
+    
+    // second pass for polymorphic structs
+    if type.type == .STRUCT {
+        for *IO_Data_Lookup {
+            if type.(*Type_Info_Struct).polymorph_source_struct == xx it.type {
+                return *it.io_data;
+            }
+        }
+    }
+    
     return null;
 }
-
-get_struct_member_io_data :: (io_data: *IO_Data, member: *Type_Info_Struct_Member) -> *IO_Data {
-    for *io_data.member_data  
-        if it.member == member  
-            return *it.io_data;
-    return null;
-}
-
 

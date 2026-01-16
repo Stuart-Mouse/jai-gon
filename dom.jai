@@ -173,7 +173,7 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
                 node.node_type = .FIELD;
             }
             // indexed arrays and arrays containing struct with defined name member will serialize as gon objects
-            else if io_data && io_data.flags & .ARRAY_INDEXED {
+            else if io_data && io_data.flags & .IS_INDEXED_ARRAY {
                 node.node_type = .OBJECT;
             }
             else if ti_array.element_type.type == .STRUCT {
@@ -185,7 +185,7 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
             else node.node_type = .ARRAY;
             
           case .STRUCT;
-            node.node_type = ifx io_data && (io_data.flags & .AS_ARRAY) 
+            node.node_type = ifx io_data && (io_data.flags & .SERIALIZE_AS_ARRAY) 
                              then .ARRAY else .OBJECT;
         }
     }
@@ -210,8 +210,8 @@ insert_data_node :: (parser: *Parser, parent: *Node, path: string, binding: Any,
             for array {
                 elem_name: string;
                 if element_io_data && element_io_data.name_member {
-                    name_member := get_member(it, element_io_data.name_member);
-                    Convert.any_to_any(elem_name, name_member);
+                    name_member := get_struct_member(it, element_io_data.name_member);
+                    Convert.any_to_any(elem_name, name_member,, temp);
                 }
                 insert_data_node(parser, node, elem_name, it, .ALLOW_DUPLICATE);
             }

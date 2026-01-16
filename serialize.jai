@@ -150,7 +150,7 @@ serialize_node :: (builder: *String_Builder, node: *Node, indent := 0, flags := 
         } else {
             flags: Serialize_Flags = .IS_FIRST_CHILD 
                 | (ifx is_array then .IN_ARRAY)
-                | (ifx io_data && (io_data.flags & .ARRAY_INDEXED) then .IN_INDEXED_ARRAY)
+                | (ifx io_data && (io_data.flags & .IS_INDEXED_ARRAY) then .IN_INDEXED_ARRAY)
                 | (ifx same_line then .SAME_LINE)
                 | (ifx should_skip_empty_elements then .SKIP_IF_EMPTY);
                 
