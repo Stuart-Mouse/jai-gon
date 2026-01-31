@@ -3,6 +3,8 @@ Parser :: struct {
     lexer:      Lexer;
     node_pool:  Flat_Pool; 
     root_node:  *Node;
+    
+    flags: Flags;
 };
 
 init_parser :: (parser: *Parser, file: string, file_path := "") {
@@ -560,7 +562,6 @@ add_data_binding_to_node :: (node: *Node, binding: Any) -> bool  {
     
     return true;
 }
-
 
 set_value_from_string :: (value: Any, text: string, should_copy_strings := true) -> bool {
     if text.count <= 0  return true;

@@ -17,6 +17,9 @@ Token_Type :: enum #specified {
     ERROR :: -1;
     EOF   ::  0;
     
+    COLON :: #char ":";
+    COMMA :: #char ",";
+    
     OBJECT_BEGIN :: #char "{";
     OBJECT_END   :: #char "}";
     ARRAY_BEGIN  :: #char "[";
@@ -78,6 +81,8 @@ lex_next_token :: (using lexer: *Lexer) -> Token {
     
     // single character tokens
     if file[0] == {
+      case ":";  advance(lexer);  return .{ .OBJECT_BEGIN, ":", token_location };
+      case ",";  advance(lexer);  return .{ .OBJECT_BEGIN, ",", token_location };
       case "{";  advance(lexer);  return .{ .OBJECT_BEGIN, "{", token_location };
       case "}";  advance(lexer);  return .{ .OBJECT_END,   "}", token_location };
       case "[";  advance(lexer);  return .{ .ARRAY_BEGIN,  "[", token_location };

@@ -4,26 +4,18 @@
 */
 
 IO_Data :: struct {
-    // for structs only
-    name_member: string;
+    // rebind:         (Any) -> Any;
+    from_string:    (value: Any, text: string) -> bool;
+    to_string:      (value: Any) -> bool, string;
     
-    // for arrays only
-    // can be used to index any array using an enum name
-    enum_index_type: *Type_Info_Enum;
+    // flags: Flags;
     
-    
-    bind_proc:      (Any) -> Any;
-    parse_proc:     (value: Any, text: string) -> bool;
-    serialize_proc: (value: Any) -> bool, string;
-    
-    flags: Flags;
-    
-    Flags :: enum_flags {
-        SKIP_IF_EMPTY;
-        SKIP_ELEMS_IF_EMPTY;
-        SERIALIZE_AS_ARRAY;
-        IS_INDEXED_ARRAY;
-    }
+    // Flags :: enum_flags {
+    //     SKIP_IF_EMPTY;
+    //     SKIP_ELEMS_IF_EMPTY;
+    //     SERIALIZE_AS_ARRAY;
+    //     IS_INDEXED_ARRAY;
+    // }
 }
 
 IO_Data_Lookup: [..] struct { type: *Type_Info; io_data: IO_Data; };

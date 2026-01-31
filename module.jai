@@ -1,5 +1,11 @@
-
-// TODO: probably put some kind of info in here or somethin
+/*
+    Jai GON Parser      ( written by u0 )
+    
+    Feel free to use this code in part or whole however you wish, 
+    though I do ask that you give credit if you use a substantial portion of this code in your project.
+    
+    TODO: Write a little bit of documentation here about the features of the parser and how to use it.
+*/
 
 #scope_module
 
@@ -21,3 +27,4 @@ Convert :: #import "Convert";
 #load "serialize.jai";
 #load "lexer.jai";
 #load "io_data.jai";
+
