@@ -1,5 +1,5 @@
 /*
-    Jai Data Model Parser / Serializer      ( written by u0 )
+    Jai Data Marshaller      ( written by u0 )
     
     Feel free to use this code in part or whole however you wish, though I do ask that you give credit if you use this module or a substantial portion of this code in your project.
     
@@ -8,6 +8,10 @@
     This module started its life as a humble GON model and serializer, and now it's grown up to do a lot more stuff.
     
     TODO: Write a little bit of documentation here about the features of the model and how to use it.
+    
+    
+    
+    
 */
 
 
@@ -123,6 +127,7 @@ Convert :: #import "Convert";
 #load "language.jai";
 #load "io_data.jai";
 #load "path.jai";
+#load "log.jai";
 
 // TODO: Check if files are actually present, check for `languages/<name>.jai` as alternative to folder with submodule.jai
 //       This will require that we somehow figre out the path of this current module...

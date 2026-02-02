@@ -55,6 +55,9 @@ main :: () {
     
     // write_string("===== Example 2: structs and arrays =====\n");
     
+    my_io_data: IO_Data_Table;
+    defer reset(*my_io_data);
+    
     Thing :: struct {
         name:       string;
         text:       string;
@@ -75,11 +78,20 @@ main :: () {
         array_free(things);
     }
     
-    add_io_data(Thing, .{
-        get_name = (value: Any) -> string { return value.value_pointer.(*Thing).name; },
-        set_name = (value: Any, name: string) { value.value_pointer.(*Thing).name = name; },
+    add_io_data(*my_io_data, Thing, .{
+        get_name = (value: Any) -> string { 
+            if value.type != xx Thing  return "";
+            return value.value_pointer.(*Thing).name;
+        },
+        set_name = (value: Any, name: string) { 
+            if value.type != xx Thing  return;
+            name_pointer := *value.value_pointer.(*Thing).name;
+            if name_pointer.* == "" {
+                name_pointer.* = copy_string(name);
+            }
+        },
         
-        flags       = .SKIP_ELEMS_IF_EMPTY
+        flags = .SKIP_ELEMS_IF_EMPTY
     });
     
     {
@@ -91,6 +103,7 @@ main :: () {
         init_data_model(*model);
         defer deinit_data_model(*model);
         
+        model.io_data_table = *my_io_data;
         model.language = JSON_get_language();
         
         ok = parse_file(*model, file, file_path);
@@ -201,10 +214,11 @@ main :: () {
         init_data_model(*model);
         defer deinit_data_model(*model);
         
+        model.io_data_table = *my_io_data;
         model.language = JSON_get_language();
         
         // Uncomment this line to see Vector3 serialized as a GON array instead of a GON object.
-        // add_io_data(Vector3, .{ flags = .AS_ARRAY });
+        add_io_data(*my_io_data, Vector3, .{ preferred_node_kind_for_serialization = .ARRAY });
         
         // Like add_data_bindings, this procedure works recursively, 
         // generating DOM nodes for every single array element and member variable.

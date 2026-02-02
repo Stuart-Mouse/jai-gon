@@ -17,8 +17,7 @@ Language :: struct {
     
     format_node_path := default_format_node_path;
     
-    // TODO: maybe optionally pass node to treat as root to parse()
-    parse:          (model: *Data_Model, file: string, file_path_for_logging: string) -> success: bool;
+    parse:          (model: *Data_Model, file: string, file_path_for_logging: string, into: *Data_Model.Node = null) -> success: bool;
     serialize_node: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node) -> success: bool;
     
     deinit: #type (model: *Data_Model);

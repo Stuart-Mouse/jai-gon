@@ -17,9 +17,12 @@
 Data_Model :: struct {
     language:           Language;
     root:               *Node;
+    io_data_table:      *IO_Data_Table;
     
     memory_pool:        Flat_Pool;  // TODO: Give user control over the pool type used. Needs to match a specific interface.
     node_free_list:     Node_List;
+    
+    last_error_string:  string;     // NOTE: allocated with temporary allocator
     
     Node :: struct {
         using links: struct {
@@ -164,55 +167,62 @@ get_child_node_by_index :: (parent: *Data_Model.Node, index: int) -> *Data_Model
 // ===== Inserting and Removing Nodes =====
 
 // NOTE: Once the first node is inserted at the given path, the binding will create new child nodes recursively for all struct members and array elements.
-insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path: string, binding: Any, insertion_behaviour := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {    
-    if binding.type == null || binding.value_pointer == null {
-        log("Data Model Error: Cannot insert node with null binding.");
-        return null;
-    }
-    
+insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path: string, binding: Any, override_kind := Data_Model.Node.Kind.UNINITIALIZED, insertion_behaviour := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {    
     if parent == null {
         ensure_root_node_exists(model);
         parent = model.root;
     }
     
+    if binding.type == null || binding.value_pointer == null {
+        report_error(model, parent, "Cannot insert node with null binding into data model.");
+        return null;
+    }
+    
+    io_data := get_io_data(model, binding.type);
+    node_kind := ifx override_kind else ifx io_data then io_data.preferred_node_kind_for_serialization;
+    
     node: *Data_Model.Node;
     if path {
-        node = insert_node_with_path(model, parent, path, .UNINITIALIZED, insertion_behaviour);
+        node = insert_node_with_path(model, parent, path, node_kind, insertion_behaviour);
     } else {
-        node = insert_child_node(model, parent, prepend = insertion_behaviour.flags & .PREPEND == .PREPEND);
+        node = insert_child_node(model, parent, "", node_kind, insertion_behaviour.flags & .PREPEND == .PREPEND);
     }
     if node == null  return node;
     
     node.binding = binding;
-    io_data := get_io_data(binding.type);
     
-    // make indirect data bindings for aggregates, unless the aggregate has defined its own serializer
-    node.kind = .FIELD; // will override in below cases
-    if !(io_data && io_data.to_string) {
+    // make indirect data bindings for aggregates, unless the aggregate has defined to_string() in its io data.
+    if io_data && io_data.to_string {
+        node.kind = ifx node.kind else .FIELD;
+    } else {
         base_type := get_variant_base_type(binding.type);
         if base_type.type == {
           case .STRUCT;
-            node.kind = .OBJECT; // TODO: use io data to get preferred node kind
+            node.kind = ifx node.kind else .OBJECT;
+            
             structure := Any_Structure.{ xx base_type, binding.value_pointer };
             for structure {
-                #this(model, node, it_info.name, it, insertion_behaviour);
+                #this(model, node, it_info.name, it, insertion_behaviour = insertion_behaviour);
             }
             
           case .ARRAY;
-            node.kind = .ARRAY; // TODO: use io data to get preferred node kind
+            node.kind = ifx node.kind else .ARRAY;
+            
             array := Any_Array.{ xx base_type, binding.value_pointer };
-            element_io_data := get_io_data(array.element_type);
+            element_io_data := get_io_data(model, array.element_type);
+            get_name := ifx node.kind != .ARRAY && element_io_data then element_io_data.get_name;
             
             for array {
-                name: string;
-                if element_io_data && element_io_data.get_name {
-                   name = element_io_data.get_name(node.binding);
-                }
-                #this(model, node, name, it, insertion_behaviour);
+                name := ifx get_name then get_name(it);
+                #this(model, node, name, it, insertion_behaviour = insertion_behaviour);
             }
+            
+          case;
+            node.kind = ifx node.kind else .FIELD;
         }
     }
     
+    assert(node.kind != .UNINITIALIZED, "node.kind was uninitialized for node @ %", format_node_path(model, node,, temp));   
     return node;
 }
 
@@ -314,7 +324,7 @@ insert_node_with_path :: (model: *Data_Model, cursor: *Data_Model.Node, path: st
         }
     }
     
-    log("Error in insert_node_with_path: given path does not terminate with a valid node name.");
+    report_error(model, cursor, "Path given to insert_node_with_path does not terminate with a valid node name.");
     return null;
 }
 
@@ -465,7 +475,7 @@ process_data_bindings :: (model: *Data_Model) -> bool {
 }
 
 process_node_binding :: (model: *Data_Model, node: *Data_Model.Node) -> bool {
-    io_data := get_io_data(node.binding.type);
+    io_data := get_io_data(model, node.binding.type);
     
     if has_valid_binding(node) {
         if io_data && io_data.set_name {
@@ -474,7 +484,7 @@ process_node_binding :: (model: *Data_Model, node: *Data_Model.Node) -> bool {
         if node.string_value {
             if io_data && io_data.from_string {
                 if !io_data.from_string(node.binding, node.string_value) {
-                    log_binding_error(node, "User-defined from_string() proc for type '%' failed with string_value '%'", as_type(node.binding.type), node.string_value);
+                    report_error(model, node, "User-defined from_string() proc for type '%' failed with string_value '%'", as_type(node.binding.type), node.string_value);
                     return false;
                 }
             } else {
@@ -501,7 +511,7 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
     if has_valid_binding(node)  return true;
     
     if node.binding.type != null {
-        log_binding_error(node, "node already has a data binding set. Node path: %", format_node_path(model, node));
+        report_error(model, node, "Attempt to add data binding to node which already has an existing binding.");
         return false;
     }
     
@@ -509,10 +519,10 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
     //       this solves the mutlitple-assignment issue naturally, since the user can just check the existing value before 
     
     node.binding = binding;
-    io_data := get_io_data(node.binding.type);
+    io_data := get_io_data(model, node.binding.type);
     if io_data && io_data.on_bind {
         io_data.on_bind(model, node);
-        io_data = get_io_data(node.binding.type);
+        io_data = get_io_data(model, node.binding.type);
     }
     
     // TODO: think about whether we want to reimplement pointer dereferencing stuff
@@ -542,13 +552,13 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             array := Any_Array.from(node.binding);
             
             count, data := get_count_and_data(array);
-            element_io_data := get_io_data(array.element_type);
+            element_io_data := get_io_data(model, array.element_type);
             
             // TODO: add generalized means for getting an array index from the given field name
             
             // NOTE: We apply an offset to the index used for child bindings when we are 
             //       dealing with a resizable array which already contains some elements.
-            index_offset := 0; 
+            index_offset := 0;
             
             if array.array_type == {
               case .RESIZABLE;
@@ -559,12 +569,12 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
               case .VIEW;
                 if data {
                     if node.children.count > count {
-                        log_binding_error(node, "bounds check failed on array or slice.");
+                        report_error(model, node, "Cannot bind object node to array. Object contains % elements, but array only contains space for % elements.", node.children.count, count);
                         return false;
                     }
                 } else if array.array_type == .VIEW {
                     assert(count == 0);
-                    resize(array, node.children.count);
+                    resize(array, node.children.count, true);
                 }
             }
             for node.children {
@@ -572,7 +582,7 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             }
             
           case;
-            log_binding_error(node, "object '%' cannot be bound to type %.", node.name, as_type(node.binding.type));
+            report_error(model, node, "Cannot bind object node to data of type %.", as_type(node.binding.type));
             return false;
         }
         
@@ -586,12 +596,12 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             child := node.children.first;
             for structure {  defer child = child.next;
                 if child == null {
-                    log_binding_error(node, "Ran out of nodes while creating bindings for members of struct type '%'.", as_type(xx structure.type));
+                    report_error(model, node, "Ran out of nodes while creating bindings for members of struct type '%'.", as_type(xx structure.type));
                 }
                 if !add_data_binding_to_node(model, child, it)  return false;
             }
             if child != null {
-                log_binding_error(node, "Too many nodes provided in array with binding to struct type '%'.", as_type(xx structure.type));
+                report_error(model, node, "Too many nodes provided in array with binding to struct type '%'.", as_type(xx structure.type));
             }
             
           case .ARRAY;
@@ -607,14 +617,14 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
               case .VIEW;
                 if data == null {
                     assert(count == 0);
-                    resize(array, node.children.count);
+                    resize(array, node.children.count, true);
                     count = node.children.count; // doing this because we read count in the .FIXED case below
                 }
                 #through;
                 
               case .FIXED;
                 if node.children.count > count {
-                    log_binding_error(node, "bounds check failed on array or slice.");
+                    report_error(model, node, "Cannot bind array node to array. Array node contains % elements, but array only contains space for % elements.", node.children.count, count);
                     return false;
                 }
             }
@@ -625,7 +635,7 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             }
             
           case;
-            log_binding_error(node, "array cannot be bound to type: %", as_type(node.binding.type));
+            report_error(model, node, "Cannot bind array node to data of type %.", as_type(node.binding.type));
             return false;
         }
         
@@ -641,32 +651,27 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             array_info := node.binding.type.(*Type_Info_Array);
             if array_info.element_type.type == .INTEGER 
             && array_info.element_type.runtime_size == 1 {
-                log_binding_error(node, "unable to bind field to array type. (A special exception is made for arrays of u8, so that they can be treated like strings.)");
+                report_error(model, node, "Cannot bind field node to array type. (A special exception is made for arrays of u8, so that they can be treated like strings.)");
                 return false;
             }
             
           case .STRUCT;
-            if !io_data || !io_data.from_string {
-                log_binding_error(node, "unable to bind field to struct type unless from_string() is defined in the type's IO_Data.");
+            if !(io_data && io_data.from_string) {
+                report_error(model, node, "Cannot bind field node to struct type unless from_string() is defined in the type's IO_Data.");
                 return false;
             }
             
           case;
-            log_binding_error(node, "unable to bind field to type: %", as_type(node.binding.type));
+            report_error(model, node, "Cannot bind field node to type: %", as_type(node.binding.type));
             return false;
         }
         
       case;
-        log_binding_error(node, "invalid node type: %", node.kind);
+        report_error(model, node, "Invalid node kind in %: %", #procedure_name(), node.kind);
         return false;
     }
     
     return true;
-}
-
-log_binding_error :: (node: *Data_Model.Node, format: string, arguments: ..Any) {
-    message := tprint(format, ..arguments);
-    log("%:%,%: Data binding error: %", node.location.fully_pathed_filename, node.location.line_number, node.location.character_number, message);
 }
 
 

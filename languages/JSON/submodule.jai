@@ -1,10 +1,3 @@
-/*
-    JSON language submodule
-    
-    Once again, special thanks to Tyler Glaiel, the creator of GON. 
-    This language submodule is really more tailored to GON than it is to JSON, 
-    but the JSON stuff is still all the default for those who want to (or need to) use JSON.
-*/
 
 JSON_get_language :: () -> Language {
     ctx := New(JSON_Context);
@@ -24,11 +17,12 @@ JSON_deinit_language :: (model: *Data_Model) {
     free(ctx);
 }
 
-
 JSON_Context :: struct {
     lexer:  JSON_Lexer;
     
     permitted_quotation_characters := "\"";
+    
+    indentation_string := "    ";
     
     json_flags: Flags;
     Flags :: enum_flags {
@@ -49,8 +43,8 @@ JSON_Context :: struct {
 
 #scope_module
 
-JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "") -> bool {
-    using gon_context := model.language.language_context.(*JSON_Context);
+JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", into: *Data_Model.Node = null) -> bool {
+    using json_context := model.language.language_context.(*JSON_Context);
     
     init_lexer(*lexer, file, file_path_for_logging);
     
@@ -66,7 +60,8 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "") ->
     
     next_token: JSON_Token;
     
-    parent := model.root;
+    root := ifx into else model.root;
+    parent := root;
     while parse_loop := (parent != null) {
         name_token, value_token: JSON_Token;
         node_kind: Data_Model.Node.Kind;
@@ -75,7 +70,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "") ->
         next_token = peek_token(*lexer);
         if next_token.kind == {
           case .EOF;
-            if parent != model.root {
+            if parent != root {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -199,7 +194,6 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "") ->
     return true;
 }
 
-#scope_module
 
 #load "serialize.jai";
 #load "lexer.jai";

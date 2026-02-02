@@ -16,11 +16,14 @@ Pass some flag for implicit vs explicit root object
 Framework
     [ ] serialization framework
     [ ] submodule system
+        [ ] find workaround for compiler warning 
+        [ ] handle single-files submodules instead of folder-based
     [ ] logging system
     [ ] lexer utilities
 
 JSON
     [ ] serialization
+        [ ] handle all language flags
     [ ] test cases
 
 
@@ -31,9 +34,30 @@ Languages to Add:
     TOML
 
 
-Immediate-Mode framework for those who don't want to use the DOM
-    maybe that should be a separate module? although we can likely reuse a lot of the same code
-    instead of using the data model as an IR, we just have in interface between the data type and language implementation directly
+Marshaller (for immediate-mode data processing)
+
+
+## Marshaller 
+
+the interface between the marshaller and the language should be roughly the same for both parsing and serialization
+but the queries the marshaller will make to the type info and io_data in either case will vary
+
+marshaller <--> language
+    begin_object / end object
+    begin_array / end_array
+    begin_field / end_field (also, put_field as a convenience)
+    put_attribute
+
+serializer interface:
+    io data --> marshaller
+        preferred_node_kind
+        
+    
+parser interface:
+    on_bind(node, binding) -> idk yet
+    get_member(name, index) -> bool, Any
+    from_string
+    
 
 
 ## Node Kind 
