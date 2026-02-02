@@ -9,6 +9,33 @@ It's really a lot like the convert module's remapping stuff, but with slightly l
 
 So now I think the move is to really isolate that DOM to internal data structures part.
 
+## TODO
+
+Pass some flag for implicit vs explicit root object
+
+Framework
+    [ ] serialization framework
+    [ ] submodule system
+    [ ] logging system
+    [ ] lexer utilities
+
+JSON
+    [ ] serialization
+    [ ] test cases
+
+
+Languages to Add:
+    Human JSON (just add config flags for json)
+    YAML (1.2)
+    XML
+    TOML
+
+
+Immediate-Mode framework for those who don't want to use the DOM
+    maybe that should be a separate module? although we can likely reuse a lot of the same code
+    instead of using the data model as an IR, we just have in interface between the data type and language implementation directly
+
+
 ## Node Kind 
 
 Now, the strict distinction between simple and aggregate types is unfortunately a bit blurrier, since in languages like XML, 
@@ -28,11 +55,24 @@ langauge (parser + lexer) -> data model is the simplest part. mostly just requir
 data model -> internal structures is more involved because we want a lot more user control at this stage
 
 
+in addition to the stuff that can be configured on a per-language basis, we will want to have some other interfaces for things that work globally
+maybe these things can just go in the context 
+    one example is things like a generalized set_value_from_string that will be used for instances like setting the name member of a struct
+    on second thought, maybe this can just go in io data. IDK
+
 
 ## Language & Data Type Extensions
 
 The module will take program parameters indicating submodules to include in the build.
 Haven't seen another module do this before, but it seems like a nice way that I can just include whatever little helpful extras I want to without forcing other users to include that code in their project.
+
+TODO: create a base logging system that each language implementation will call through to report logs.
+      we want to have relatively standardized formatting and such
+
+
+
+
+
 
 
 What we really want here is something like a Data_Model struture that we acts as the intermediate between any file format and 
@@ -54,6 +94,29 @@ tagged_union support
 add a generic value type similar to what Jaison has with JSON_Value
 
 reimplement a macro-based parser
+
+
+## Doumentation for Node Kinds
+
+The kind specified for a node may mean slightly different things or be handled differently depending on the language used.
+The three basic node kinds (FIELD, OBJECT, and ARRAY) are derived from the structure of JSON.
+
+A FIELD is single-valued, and generally has no child nodes. 
+    (I say generally because we do actually allow child nodes on a field for the sake of enum_flags and other 'single-binding but multi-valued' types.)
+    JSON and GON do not support this syntax by default, but you can enable it if you so wish.
+
+An OBJECT is a multi-valued type in which all child nodes are expected to have a unique name.
+
+An ARRAY is a multi-valued type in which child nodes are not expected to have a name.
+
+JSON will not parse anything into an ATTRIBUTE, but it will serialize attributes as though they were just regular child nodes, optionally with some special prefix attached.
+
+
+
+
+
+
+
 
 
 

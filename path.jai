@@ -37,12 +37,12 @@ Pathfinder :: struct {
     }
 }
 
-reset :: inline (path: *Pathfinder) {
+reset :: inline (pathfinder: *Pathfinder) {
     pathfinder.remainder = pathfinder.path;
 }
 
-set_path :: inline (pathfinder: *Pathfinder, path: string) -> {
-    parthfinder.path = path;
+set_path :: inline (pathfinder: *Pathfinder, path: string) {
+    pathfinder.path = path;
     reset(pathfinder);
 }
 
@@ -53,15 +53,16 @@ peek_step :: inline (pathfinder: *Pathfinder) -> step: Pathfinder.Step, is_final
 // NOTE: The second return value just tells you if the current step is the last one before .END
 //       We use this to make some logic easier in the node insertion code.
 get_step :: (pathfinder: *Pathfinder) -> step: Pathfinder.Step, is_final: bool {
-    if is_first_step(pathfinder)  pathfinder.get_step(pathfinder);
-    
+    if is_first_step(pathfinder) {
+        pathfinder.next_step = pathfinder.get_step(pathfinder);
+    }
     step := pathfinder.next_step;
     pathfinder.next_step = pathfinder.get_step(pathfinder);
-    return step, pathfinder.next_step == .END;
+    return step, pathfinder.next_step.kind == .END;
 }
 
-is_first_step :: inline (path: Pathfinder) -> bool {
-    return path.as_string.data == path.remainder.data;
+is_first_step :: inline (pathfinder: Pathfinder) -> bool {
+    return pathfinder.path.data == pathfinder.remainder.data;
 }
 
 is_end :: inline (path: Pathfinder) -> bool {
@@ -77,9 +78,9 @@ get_pathfinder :: (model: *Data_Model, path: string) -> Pathfinder {
 
 default_pathfinder_step :: (using pathfinder: *Pathfinder) -> Pathfinder.Step {
     while true {
-        if remainder.count == 0  return .{ kind = END };
+        if remainder.count == 0  return .{ kind = .END };
         
-        if is_first_step(path) && is_any(path[0], "/\\") {
+        if is_first_step(pathfinder) && is_any(path[0], "/\\") {
             advance(*remainder, 1);
             return .{ kind = .ABSOLUTE };
         }
@@ -92,7 +93,7 @@ default_pathfinder_step :: (using pathfinder: *Pathfinder) -> Pathfinder.Step {
           case ".";   continue;
         }
         
-        return .{ kind = .STEP_INTO, name = left };
+        return .{ kind = .STEP_INTO_BY_NAME, name = left };
     }
 }
 
@@ -106,7 +107,7 @@ format_node_path :: (model: *Data_Model, node: *Data_Model.Node) -> string {
 
 default_format_node_path :: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node) {
     if node.parent != null {
-        default_format_node_path(builder, node.parent);
+        default_format_node_path(builder, model, node.parent);
         append(builder, "/");
     }
     append(builder, node.name);

@@ -4,20 +4,25 @@
 */
 
 IO_Data :: struct {
-    // rebind:         (Any) -> Any;
+    get_name:       (Any) -> string;
+    set_name:       (Any, string);
+    
+    on_bind:        (*Data_Model, *Data_Model.Node) -> bool;
+    
     from_string:    (value: Any, text: string) -> bool;
     to_string:      (value: Any) -> bool, string;
     
-    // flags: Flags;
-    
-    // Flags :: enum_flags {
-    //     SKIP_IF_EMPTY;
-    //     SKIP_ELEMS_IF_EMPTY;
-    //     SERIALIZE_AS_ARRAY;
-    //     IS_INDEXED_ARRAY;
-    // }
+    flags: Flags;
+    Flags :: enum_flags {
+        SKIP_IF_EMPTY;
+        SKIP_ELEMS_IF_EMPTY;
+        SERIALIZE_AS_ARRAY;
+        IS_INDEXED_ARRAY;
+    }
 }
 
+// TODO: instead of having this globally, we should have some ability for the user to put a *[]IO_Data on the language info and data model itself.
+//       then the user can just manage their own global lookup if they so choose, and they can also just point the model or language at their global array.
 IO_Data_Lookup: [..] struct { type: *Type_Info; io_data: IO_Data; };
 
 add_io_data :: inline (type: Type, io_data: IO_Data) {
@@ -25,26 +30,13 @@ add_io_data :: inline (type: Type, io_data: IO_Data) {
 }
 
 add_io_data :: (type: *Type_Info, io_data: IO_Data) {
-    // basic validation before adding io_data, so that we don't need to check later...
-    _io_data := io_data;
-    base_type := get_variant_base_type(type);
-    if _io_data.name_member && base_type.type != .STRUCT {
-        log("Warning: cannot set a name member in io data for on a non-struct type.");
-        _io_data.name_member = "";
-    }
-    if _io_data.enum_index_type && base_type.type != .ARRAY {
-        log("Warning: cannot set an enum index type in io data for a non-array type.");
-        _io_data.enum_index_type = null;
-    }
-    
     for *IO_Data_Lookup {
         if it.type == type {
-            it.io_data = _io_data;
+            it.io_data = io_data;
             return;
         }
     }
-    
-    array_add(*IO_Data_Lookup, .{ type, _io_data });
+    array_add(*IO_Data_Lookup, .{ type, io_data });
 }
 
 get_io_data :: (type: *Type_Info) -> *IO_Data {
