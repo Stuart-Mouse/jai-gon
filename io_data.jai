@@ -4,7 +4,8 @@
 */
 
 IO_Data :: struct {
-    // allocator:      Allocator; // TODO: maybe also have a get_instance proc so that users can allocate in nonstandard ways, e.g. fixed global arrays and such
+    // allocator:      Allocator;
+    // get_instance:   () -> *void;
     
     preferred_node_kind_for_serialization: Data_Model.Node.Kind;
     

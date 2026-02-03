@@ -50,11 +50,11 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
     
     ensure_root_node_exists(model);
     
-    log_unexepected_token :: (token: JSON_Token) {
+    log_unexepected_token :: (token: JSON_Token) #expand {
         if token.kind == .ERROR {
-            log("%:%,%: JSON lexer error: %.", token.location.fully_pathed_filename, token.location.line_number, token.location.character_number, token.text);
+            report_error(model, token.location, token.text);
         } else {
-            log("%:%,%: JSON parser error: Unexpected % token: '%'.", token.location.fully_pathed_filename, token.location.line_number, token.location.character_number, token.kind, token.text);
+            report_error(model, token.location, "Unexpected % token: '%'.", token.kind, token.text);
         }
     }
     

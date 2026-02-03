@@ -14,15 +14,15 @@ So now I think the move is to really isolate that DOM to internal data structure
 Pass some flag for implicit vs explicit root object
 
 Framework
-    [ ] serialization framework
+    [x] serialization framework
     [ ] submodule system
         [ ] find workaround for compiler warning 
         [ ] handle single-files submodules instead of folder-based
-    [ ] logging system
+    [x] logging system
     [ ] lexer utilities
 
 JSON
-    [ ] serialization
+    [x] serialization
         [ ] handle all language flags
     [ ] test cases
 
