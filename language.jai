@@ -10,6 +10,8 @@
 
 Language :: struct {
     name:               string;
+    id:                 string;
+    
     language_context:   *void;      // context structure for lanaguage parser/serializer, or anything else the language implementation needs.
     pathfinder:         Pathfinder;
     

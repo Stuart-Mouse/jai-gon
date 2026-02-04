@@ -1,20 +1,13 @@
-
-# You can write comments like so.
-# I will probably add an option to use c-style comments instead,
-# but for now I'm just trying to follow the standard GON format.
-
-# Unicode characters are handled fine as long as you keep them in strings.
-
 things {
     "Thing 1" {
         numbers     [ 1, 2, 3, 4, 5 ]
         text        "this is a string"
-        flags       [ FIRST, THIRD ]        # enum_flags are written as an array of individual flag values
+        flags       "FIRST"
     }
     "Thing 2" {
         numbers     [ 5, 4, 3, 2, 1 ]
         text        "this is another string"
-        flags       [ THIRD, SECOND ]
+        flags       "THIRD"
         position    [ 420, 69, 58008 ]
     }
 }

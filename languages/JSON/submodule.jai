@@ -1,10 +1,11 @@
 
-JSON_get_language :: () -> Language {
+JSON_get_language :: (config := JSON_Config.{}) -> Language {
     ctx := New(JSON_Context);
-    ctx.json_flags = JSON_Context.Flags.NONE;
+    ctx.config = config;
     
     return .{
         name              = "JSON",
+        id                = JSON_LANGUAGE_ID,
         language_context  = ctx,
         parse             = JSON_parse,
         serialize_node    = JSON_serialize_node,
@@ -20,8 +21,11 @@ JSON_deinit_language :: (model: *Data_Model) {
 JSON_Context :: struct {
     lexer:  JSON_Lexer;
     
+    using config: JSON_Config;
+};
+
+JSON_Config :: struct {
     permitted_quotation_characters := "\"";
-    
     indentation_string := "    ";
     
     json_flags: Flags;
@@ -39,9 +43,11 @@ JSON_Context :: struct {
         
         DEFAULT_GON_FLAGS :: PERMIT_TRAILING_COMMA_IN_OBJECT | PERMIT_IDENTIFIERS_AS_KEYS | PERMIT_IDENTIFIERS_AS_VALUES | PERMIT_NUMBERS_AS_KEYS | DONT_REQUIRE_COMMAS | DONT_REQUIRE_COLONS;
     }
-};
+}
 
 #scope_module
+
+JSON_LANGUAGE_ID :: "JSON";
 
 JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", into: *Data_Model.Node = null) -> bool {
     using json_context := model.language.language_context.(*JSON_Context);

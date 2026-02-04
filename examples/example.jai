@@ -7,9 +7,12 @@
 #import "GON"()(LANGUAGES=string.["JSON"]);
 
 main :: () {
+    
+    TEST_GON :: true;
+    
     write_string("===== Example 1: the basics =====\n");
     {
-        // Suppose we have the following GON file:
+        // Suppose we have the following JSON file:
         file :: #string END
         "my_int": 5,
         "foo": {
@@ -51,7 +54,7 @@ main :: () {
         print("my_string: \"%\"\n", my_string);
     }
     write_string("\n\n");
-
+    
     
     // write_string("===== Example 2: structs and arrays =====\n");
     
@@ -95,7 +98,7 @@ main :: () {
     });
     
     {
-        file_path := "example.json";
+        file_path := "example.gon";
         file, ok := read_entire_file(file_path);
         if !ok  return;
         
@@ -104,7 +107,7 @@ main :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language();
+        model.language = JSON_get_language(.{json_flags = JSON_Config.Flags.DEFAULT_GON_FLAGS});
         
         ok = parse_file(*model, file, file_path);
         if !ok  return;
@@ -215,7 +218,7 @@ main :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language();
+        model.language = JSON_get_language(.{json_flags = JSON_Config.Flags.DEFAULT_GON_FLAGS});
         
         // Uncomment this line to see Vector3 serialized as a GON array instead of a GON object.
         add_io_data(*my_io_data, Vector3, .{ preferred_node_kind_for_serialization = .ARRAY });

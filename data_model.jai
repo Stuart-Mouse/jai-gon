@@ -691,7 +691,7 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
         if !should_copy_strings {
             string_value_pointer.* = text;
         } else {
-            str, ok := convert_escape_sequences(text);
+            str, ok := unescape_string(text);
             if !ok  return false;
             string_value_pointer.* = str;
         }

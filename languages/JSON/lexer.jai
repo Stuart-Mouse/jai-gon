@@ -30,13 +30,13 @@ JSON_Token :: struct {
 }
 
 JSON_Lexer :: struct {
-    file: string;
+    using #as scanner: Scanner;
     next_token:  JSON_Token;
-    using location: Source_Code_Location;
     
     skip_whitespace     := JSON_skip_whitespace;
     try_lex_number      := JSON_try_lex_number;
     try_lex_identifier  := default_try_lex_identifier;
+    is_legal_identifier := default_is_legal_identifier;
     
     whitespace_characters := " \t\r\n";
 }
@@ -211,75 +211,4 @@ JSON_try_lex_number :: (using lexer: *JSON_Lexer) -> bool, string {
     
     return true, .{ file.data - start, start };
 }
-
-
-
-
-// TODO: move alternative lexer procs to some utils file
-
-begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char == "_"; }
-continues_identifier :: is_alnum;
-
-default_try_lex_identifier :: (using lexer: *JSON_Lexer) -> bool, string {
-    if begins_identifier(file[0]) {
-        str: string = .{ 1, *file[0] };
-        while continues_identifier(file[0]) && advance(lexer) {}
-        str.count = file.data - str.data;
-        return true, str;
-    }
-    return true, "";
-}
-
-is_legal_identifier :: (str: string) -> bool {
-    if !str return false;
-    if !begins_identifier(str[0])  return false;
-    for str  if !continues_identifier(it)  return false;
-    return true;
-}
-
-skip_whitespace_and_hashtag_comments :: (using lexer: *JSON_Lexer) -> bool {
-    if file.count == 0 return false;
-    while true {
-        while is_any(file[0], whitespace_chars) {
-            if !advance(lexer) return false;
-        }
-        if file[0] == "#" {
-            while file[0] != "\n" {
-                if !advance(lexer) return false;
-            }
-        }
-        else return true;
-    }
-    return true;
-}
-
-skip_whitespace_and_c_style_comments :: (using lexer: *JSON_Lexer) -> bool {
-    if file.count == 0  return true;
-    
-    while loop := file.count > 0 {
-        while is_whitespace(file[0]) {
-            if !advance(lexer)  break;
-        }
-        if begins_with(file, "//") {
-            advance(lexer, 2);
-            while file[0] != #char "\n" {
-                if !advance(lexer)  break loop;
-            }
-            advance(lexer);
-        }
-        else if begins_with(file, "/*") {
-            advance(lexer, 2);
-            while !begins_with(file, "*/") {
-                if !advance(lexer) {
-                    return false;
-                }
-            }
-            advance(lexer, 2);
-        }
-        else break;
-    }
-    return true;
-}
-
-
 
