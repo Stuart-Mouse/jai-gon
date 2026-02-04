@@ -114,6 +114,7 @@ serialize_to_builder :: (using model: *Data_Model, builder: *String_Builder) -> 
 #import "Basic";
 #import "String";
 #import "File";
+#import "File_Utilities";
 #import "Math";
 #import "Flat_Pool";
 #import "Unicode";
@@ -131,23 +132,41 @@ Convert :: #import "Convert";
 #load "log.jai";
 #load "utils.jai";
 
-// TODO: Check if files are actually present, check for `languages/<name>.jai` as alternative to folder with submodule.jai
-//       This will require that we somehow figre out the path of this current module...
-#insert -> string {
-    FORMAT_STRING := "#load \"languages/%/submodule.jai\";";
+// TODO: While we still get this weird compiler warning due to inserting a #load, we should just read the entire file and insert the contents here. 
+//       I don't exactly like that, but it's better than getting weird compiler warnings every compile.
+#insert #run,stallable -> string {
     builder: String_Builder;
     for LANGUAGES {
-        print(*builder, FORMAT_STRING, it);
+        find_submodule_and_append(*builder, "languages", it);
     }
-    return builder_to_string(*builder,, temp);
-}
+    result := builder_to_string(*builder,, temp);
+    log("result: %", result);
+    return result;
+};
 
-#insert -> string {
-    FORMAT_STRING := "#load \"types/%/submodule.jai\";";
+#insert #run,stallable -> string {
     builder: String_Builder;
     for TYPES {
-        print(*builder, FORMAT_STRING, it);
+        find_submodule_and_append(*builder, "types", it);
     }
     return builder_to_string(*builder,, temp);
+};
+
+find_submodule_and_append :: (builder: *String_Builder, submodule_directory: string, submodule_name: string, loc := #caller_location) #compile_time {
+    module_directory := path_strip_filename(loc.fully_pathed_filename);
+    
+    submodule_file_path := tprint("%/%/%.jai", module_directory, submodule_directory, submodule_name);
+    if file_exists(submodule_file_path) {
+        print(builder, "#load \"%/%.jai\";", submodule_directory, submodule_name);
+        return;
+    }
+    
+    submodule_file_path = tprint("%/%/%/submodule.jai", module_directory, submodule_directory, submodule_name);
+    if file_exists(submodule_file_path) {
+        print(builder, "#load \"%/%/submodule.jai\";", submodule_directory, submodule_name);
+        return;
+    }
+    
+    assert(false, "Unable to locate submodule '%' in '%/%'.", submodule_name, module_directory, submodule_directory);
 }
 
