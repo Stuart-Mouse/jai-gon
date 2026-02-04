@@ -37,6 +37,8 @@ Languages to Add:
 Marshaller (for immediate-mode data processing)
 
 
+support parsing of hex floats in parse_number
+
 ## Marshaller 
 
 the interface between the marshaller and the language should be roughly the same for both parsing and serialization
@@ -60,7 +62,7 @@ parser interface:
     
 
 
-## Node Kind 
+## Node Kind
 
 Now, the strict distinction between simple and aggregate types is unfortunately a bit blurrier, since in languages like XML, 
 there is almost no syntactic difference between single-valued and multi-valued tags.

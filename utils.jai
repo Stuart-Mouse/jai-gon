@@ -144,7 +144,7 @@ skip_whitespace_and_c_style_comments :: (using scanner: *Scanner) -> bool {
             see what jai does when we have some weird thing like number ending with dot and no following digits
         
 */
-try_lex_number :: (using scanner: *Scanner) -> string {
+default_try_lex_number :: (using scanner: *Scanner) -> string {
     if file && (is_digit(file[0]) || (file.count > 1 && (file[0] == "+" || file[0] == "-" || file[0] == ".") && is_digit(file[1]))) {
         text := string.{ 0, file.data };
         
@@ -451,7 +451,7 @@ string_to_u64 :: (text: string, base: u64 = 10) -> result: u64, success: bool, r
     Note to self: 
         Convert.jai has its own more constrained version (string_to_int) and a more general use case set_value_from_string procedure.
         I see this procedure as being most useful for parsers like GON or Lead Sheets, where you really need the Any_Number as an intermediate value for an expented period of time.
-        
+    
     TODO: support octal numbers
     TODO: support hexadecimal floats
 */

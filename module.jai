@@ -155,12 +155,14 @@ Convert :: #import "Convert";
 find_submodule_and_append :: (builder: *String_Builder, submodule_directory: string, submodule_name: string, loc := #caller_location) #compile_time {
     module_directory := path_strip_filename(loc.fully_pathed_filename);
     
+    // try importing single-file submodule
     submodule_file_path := tprint("%/%/%.jai", module_directory, submodule_directory, submodule_name);
     if file_exists(submodule_file_path) {
         print(builder, "#load \"%/%.jai\";", submodule_directory, submodule_name);
         return;
     }
     
+    // try importing folder-based submodule
     submodule_file_path = tprint("%/%/%/submodule.jai", module_directory, submodule_directory, submodule_name);
     if file_exists(submodule_file_path) {
         print(builder, "#load \"%/%/submodule.jai\";", submodule_directory, submodule_name);
