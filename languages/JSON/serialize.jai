@@ -44,7 +44,7 @@ JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Dat
     
     // TODO: 
     if node.parent.kind != .ARRAY {
-        omit_quotes := (json_flags & .PERMIT_IDENTIFIERS_AS_KEYS) && lexer.is_legal_identifier(node.name);
+        omit_quotes := (lexer_flags & .PERMIT_IDENTIFIERS_AS_KEYS) && lexer.is_legal_identifier(node.name);
         if omit_quotes
             then append(builder, node.name);
             else JSON_append_string(builder, node.name);

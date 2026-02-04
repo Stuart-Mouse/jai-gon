@@ -1,7 +1,5 @@
 #scope_module
 
-#import "Unicode";
-
 JSON_Token :: struct {
     kind:       Kind;
     text:       string;
@@ -33,38 +31,14 @@ JSON_Lexer :: struct {
     using #as scanner: Scanner;
     next_token:  JSON_Token;
     
-    skip_whitespace     := JSON_skip_whitespace;
-    try_lex_number      := JSON_try_lex_number;
-    try_lex_identifier  := default_try_lex_identifier;
-    is_legal_identifier := default_is_legal_identifier;
-    
-    whitespace_characters := " \t\r\n";
+    using config: JSON_Lexer_Config;
 }
 
-init_lexer :: (lexer: *JSON_Lexer, file: string, file_path_for_logging := "") {
+init_lexer :: (lexer: *JSON_Lexer, config: JSON_Lexer_Config, file: string, file_path_for_logging := "") {
+    lexer.config   = config;
     lexer.file     = file;
     lexer.location = .{ file_path_for_logging, 1, 1 };
     get_token(lexer);
-}
-
-// advances UP TO the amount specified, returns false on EOF
-advance :: inline (using lexer: *JSON_Lexer, amount := 1) -> bool {
-    assert(amount >= 0);
-    _amount := min(amount, file.count);
-    
-    for 0.._amount-1 {
-        if file[it] == "\n" {
-            location.line_number += 1;
-            location.character_number = 1;
-        } else {
-            location.character_number += 1;
-        }
-    }
-    
-    file.data  += _amount;
-    file.count -= _amount;
-    
-    return file.count > 0; // return false when we hit EOF
 }
 
 get_token :: inline (using lexer: *JSON_Lexer) -> JSON_Token {

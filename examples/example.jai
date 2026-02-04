@@ -107,7 +107,7 @@ main :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language(.{json_flags = JSON_Config.Flags.DEFAULT_GON_FLAGS});
+        model.language = JSON_get_language(.{lexer_flags = .DEFAULT_GON_FLAGS});
         
         ok = parse_file(*model, file, file_path);
         if !ok  return;
@@ -218,7 +218,7 @@ main :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language(.{json_flags = JSON_Config.Flags.DEFAULT_GON_FLAGS});
+        model.language = JSON_get_language(.{lexer_flags = .DEFAULT_GON_FLAGS});
         
         // Uncomment this line to see Vector3 serialized as a GON array instead of a GON object.
         add_io_data(*my_io_data, Vector3, .{ preferred_node_kind_for_serialization = .ARRAY });

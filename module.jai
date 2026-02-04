@@ -116,6 +116,7 @@ serialize_to_builder :: (using model: *Data_Model, builder: *String_Builder) -> 
 #import "File";
 #import "Math";
 #import "Flat_Pool";
+#import "Unicode";
 
 // I have no idea why next_power_of_two is #scope_export...
 using,except(next_power_of_two) Hash_Table :: #import "Hash_Table";

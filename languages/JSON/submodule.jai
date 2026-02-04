@@ -19,16 +19,31 @@ JSON_deinit_language :: (model: *Data_Model) {
 }
 
 JSON_Context :: struct {
-    lexer:  JSON_Lexer;
-    
     using config: JSON_Config;
+    
+    lexer:  JSON_Lexer;
 };
 
 JSON_Config :: struct {
-    permitted_quotation_characters := "\"";
-    indentation_string := "    ";
+    using lexer_config: JSON_Lexer_Config;
     
-    json_flags: Flags;
+    // TODO: maybe handle indentation differently, pass as parameter to serialize proc or something...
+    indentation_string := "    ";
+}
+
+// TODO: I do not like that we are currently copying all this config into the lexer on init.
+//       But at the moment, basically all the config is for the lexer, and I don't currently have a good way of making the config available to both the language context and the lexer itself other than to pass the entire context to lexer procs, or to have the lexer point to the context, which is dumb...
+//       The best solution will probably just be to pass the whole context to the lexer procs, even though that's kind of gross.
+//       Or maybe we can do something with context to make this nicer all around, because now I am also thinking about what if we want the scanner to have access to the language config and whatnot. But maybe that's a bridge too far anyhow... I dunno. I am tired.
+JSON_Lexer_Config :: struct {
+    skip_whitespace     := JSON_skip_whitespace;
+    try_lex_number      := JSON_try_lex_number;
+    try_lex_identifier  := default_try_lex_identifier;
+    is_legal_identifier := default_is_legal_identifier;
+    permitted_quotation_characters := "\"";
+    whitespace_characters := " \t\r\n";
+    
+    lexer_flags: Flags;
     Flags :: enum_flags {
         NONE :: 0;
         
@@ -52,7 +67,7 @@ JSON_LANGUAGE_ID :: "JSON";
 JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", into: *Data_Model.Node = null) -> bool {
     using json_context := model.language.language_context.(*JSON_Context);
     
-    init_lexer(*lexer, file, file_path_for_logging);
+    init_lexer(*lexer, lexer_config, file, file_path_for_logging);
     
     ensure_root_node_exists(model);
     
@@ -100,7 +115,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             get_token(*lexer);
             
           case;
-            if parent.children.count != 0 && (!json_flags & .DONT_REQUIRE_COMMAS) {
+            if parent.children.count != 0 && (!lexer_flags & .DONT_REQUIRE_COMMAS) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -111,12 +126,12 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             next_token = get_token(*lexer);
             if next_token.kind == {
               case .IDENTIFIER; 
-                if !(json_flags & .PERMIT_IDENTIFIERS_AS_KEYS) {
+                if !(lexer_flags & .PERMIT_IDENTIFIERS_AS_KEYS) {
                     log_unexepected_token(next_token);
                 }
                 
               case .NUMBER;
-                if !(json_flags & .PERMIT_NUMBERS_AS_KEYS) {
+                if !(lexer_flags & .PERMIT_NUMBERS_AS_KEYS) {
                     log_unexepected_token(next_token);
                 }
                 
@@ -134,7 +149,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             next_token = peek_token(*lexer);
             if next_token.kind == .COLON {
                 get_token(*lexer);
-            } else if (!json_flags & .DONT_REQUIRE_COLONS) {
+            } else if (!lexer_flags & .DONT_REQUIRE_COLONS) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -149,7 +164,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
         // read field value
         if next_token.kind == {
           case .IDENTIFIER;
-            if !(json_flags & .PERMIT_IDENTIFIERS_AS_VALUES) {
+            if !(lexer_flags & .PERMIT_IDENTIFIERS_AS_VALUES) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -185,7 +200,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             
           case .FIELD;
             // next_token = peek_token(*lexer);
-            // if json_flags & .PERMIT_MULTI_VALUED_FIELDS && next_token.kind == .VALUE_SEPARATOR {
+            // if lexer_flags & .PERMIT_MULTI_VALUED_FIELDS && next_token.kind == .VALUE_SEPARATOR {
             //     get_token(*lexer);
             //     parent = node;
                 
