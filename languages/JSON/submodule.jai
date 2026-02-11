@@ -22,7 +22,7 @@ JSON_Context :: struct {
     using config: JSON_Config;
     
     lexer:  JSON_Lexer;
-};
+}
 
 JSON_Config :: struct {
     using lexer_config: JSON_Lexer_Config;
@@ -52,12 +52,12 @@ JSON_Config :: struct {
 //       The best solution will probably just be to pass the whole context to the lexer procs, even though that's kind of gross.
 //       Or maybe we can do something with context to make this nicer all around, because now I am also thinking about what if we want the scanner to have access to the language config and whatnot. But maybe that's a bridge too far anyhow... I dunno. I am tired.
 JSON_Lexer_Config :: struct {
-    skip_whitespace                 := JSON_skip_whitespace;
+    skip_whitespace                 := default_skip_whitespace;
     try_lex_number                  := JSON_try_lex_number;
     try_lex_identifier              := default_try_lex_identifier;
     is_legal_identifier             := default_is_legal_identifier;
     permitted_quotation_characters  := "\"";
-    whitespace_characters           := " \t\r\n";
+    whitespace_characters           := Scanner.DEFAULT_WHITESPACE_CHARACTERS;
 }
 
 #scope_module
@@ -163,6 +163,10 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
         
         // read field value
         if next_token.kind == {
+          case .NULL;
+            node_kind = .FIELD;
+            // Not setting value for now. Need to determine how to handle this properly.
+            
           case .IDENTIFIER;
             if !(json_flags & .PERMIT_IDENTIFIERS_AS_VALUES) {
                 log_unexepected_token(next_token);
@@ -170,9 +174,9 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             }
             #through;
             
-          case .NUMBER;
-            #through;
-            
+          case .TRUE;   #through;
+          case .FALSE;  #through;
+          case .NUMBER; #through;
           case .STRING;
             node_kind = .FIELD;
             value_token = next_token;

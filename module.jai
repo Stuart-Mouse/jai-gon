@@ -7,7 +7,7 @@
     Implementing a GON model has been my first real project in just about every language I know well, and the experience has taught me a lot each time.
     This module started its life as a humble GON model and serializer, and now it's grown up to do a lot more stuff.
     
-    TODO: Write a little bit of documentation here about the features of the model and how to use it.
+    TODO: Write a little bit of documentation here about the features of the module and how to use it.
     
     
     
@@ -15,7 +15,7 @@
 */
 
 
-#module_parameters ()(LANGUAGES: [] string, TYPES: [] string = .[]);
+#module_parameters ()(LANGUAGES: [] string);
 
 // ========== Parsing ==========
 
@@ -133,24 +133,23 @@ Convert :: #import "Convert";
 #load "utils.jai";
 
 // TODO: While we still get this weird compiler warning due to inserting a #load, we should just read the entire file and insert the contents here. 
-//       I don't exactly like that, but it's better than getting weird compiler warnings every compile.
+//       I don't exactly like that, but it's probably better than getting weird compiler warnings every compile.
 #insert #run,stallable -> string {
     builder: String_Builder;
     for LANGUAGES {
         find_submodule_and_append(*builder, "languages", it);
     }
     result := builder_to_string(*builder,, temp);
-    log("result: %", result);
     return result;
 };
 
-#insert #run,stallable -> string {
-    builder: String_Builder;
-    for TYPES {
-        find_submodule_and_append(*builder, "types", it);
-    }
-    return builder_to_string(*builder,, temp);
-};
+// #insert #run,stallable -> string {
+//     builder: String_Builder;
+//     for TYPES {
+//         find_submodule_and_append(*builder, "types", it);
+//     }
+//     return builder_to_string(*builder,, temp);
+// };
 
 find_submodule_and_append :: (builder: *String_Builder, submodule_directory: string, submodule_name: string, loc := #caller_location) #compile_time {
     module_directory := path_strip_filename(loc.fully_pathed_filename);

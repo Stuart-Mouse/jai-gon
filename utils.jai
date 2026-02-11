@@ -29,6 +29,8 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 Scanner :: struct {
     file: string;
     using location: Source_Code_Location;
+    
+    DEFAULT_WHITESPACE_CHARACTERS :: " \t\r\n";
 }
 
 init_scanner :: (scanner: *Scanner, file: string, file_path: string) {
@@ -83,10 +85,17 @@ default_is_legal_identifier :: (str: string) -> bool {
     return true;
 }
 
-skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner) -> bool {
+default_skip_whitespace :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
+    while is_any(file[0], whitespace_characters) {
+        if !advance(scanner) return false;
+    }
+    return true;
+}
+
+skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
     if file.count == 0 return false;
     while true {
-        while is_any(file[0], whitespace_chars) {
+        while is_any(file[0], whitespace_characters) {
             if !advance(scanner) return false;
         }
         if file[0] == "#" {
@@ -99,11 +108,11 @@ skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner) -> bool {
     return true;
 }
 
-skip_whitespace_and_c_style_comments :: (using scanner: *Scanner) -> bool {
+skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
     if file.count == 0  return true;
     
     while loop := file.count > 0 {
-        while is_any(file[0], whitespace_chars) {
+        while is_any(file[0], whitespace_characterss) {
             if !advance(lexer)  break;
         }
         if begins_with(file, "//") {
