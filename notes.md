@@ -2,7 +2,7 @@
 # Data Model Refactoring
 
 I realized this a while ago, but now seems like a decent time to act on it:
-The primary value of this module that I would like to package up in a way that other can use it is not primarily in it being a JSON / GON parser, 
+The primary value of this module that I would like to package up in a way that others can use it is not primarily in it being a JSON / GON parser, 
 it's in the work that it does to map a DOM structure into internal data structures. 
 And that part of the code can be pretty cleanly separated from whatever language parser you want to use it in conjunction with.
 It's really a lot like the convert module's remapping stuff, but with slightly looser structures involved.
@@ -15,11 +15,12 @@ Pass some flag for implicit vs explicit root object
 
 Framework
     [x] serialization framework
-    [ ] submodule system
+    [x] submodule system
         [ ] find workaround for compiler warning 
-        [ ] handle single-files submodules instead of folder-based
+        [x] handle single-files submodules in addition to folder-based submodules
     [x] logging system
-    [ ] lexer utilities
+        [ ] add proc to get last error message from model
+    [x] lexer utilities
 
 JSON
     [x] serialization
@@ -38,6 +39,8 @@ Marshaller (for immediate-mode data processing)
 
 
 support parsing of hex floats in parse_number
+
+
 
 ## Marshaller 
 
