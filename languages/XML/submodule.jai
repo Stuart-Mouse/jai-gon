@@ -49,9 +49,53 @@ XML_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", int
     
     init_lexer(*lexer, lexer_config, file, file_path_for_logging);
     
-    
-    
-    
+    while main_loop := true {
+        
+        next_token := peek_token(*lexer);
+        if next_token.kind == .TAG_BEGIN {
+            get_token(*lexer);
+            
+            next_token = get_token(*lexer);
+            if next_token.kind != .NAME {
+                log("expected a name");
+                return false;
+            }
+            if next_token.preceding_whitespace {
+                log("cannot have whitespace between < and tag name");
+                return false;
+            }
+            
+            while true {
+                ok, parsed := try_parse_attribute(model);
+                if !ok      return false;
+                if !parsed  break;
+            }
+            
+            next_token = get_token(*lexer);
+            if next_token.kind == .CLOSING_TAG_END {
+                // This is a self-closing tag.
+                continue main_loop;
+            }
+            
+            if next_token.kind != .TAG_END {
+                log("expected `>` or `/>` to close tag");
+                return false;
+            }
+            
+            // parse content of tag
+            
+            /*
+                we can alternate between parsing string data and child tags
+                this poses a problem for adapting directly to our data model, because our data model really expects for the 'value' of a node to be a single string,
+                    not another array of heterogenous data (strings and/or other tags)
+                perhaps what we can do is just to say that the 'value' of an xml element is the substring of the entire tag contents taken as a whole
+                then in the child nodes, we can specially flag those child nodes which are pure character data as being such
+                tags will be flagged to indicate whether they contain character data, subtags, or both.
+                for the purposes of use in data files, I wager that most people will want to restrict the parser to permit only one or the other kind of data within a givne tag
+            */ 
+            
+        }
+    }
     
     return true;
 }
@@ -64,6 +108,4 @@ try_parse_tag
 try_parse_attribute
     name = "value"
 
-
 */
-
