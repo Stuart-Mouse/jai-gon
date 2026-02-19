@@ -40,13 +40,14 @@ Data_Model :: struct {
         children:       Node_List;
         
         Kind :: enum { 
-            UNINITIALIZED :: 0;
+            UNINITIALIZED   :: 0;
             
-            FIELD         :: 1;
-            OBJECT        :: 2;
-            ARRAY         :: 3;
+            FIELD           :: 1;
+            OBJECT          :: 2;
+            ARRAY           :: 3;
             
-            ATTRIBUTE     :: 4;
+            ATTRIBUTE       :: 4;
+            CHARACTER_DATA  :: 5;
         }
     }
     
@@ -117,7 +118,15 @@ deinit_data_model :: (model: *Data_Model) {
 }
 
 is_aggregate :: (node: *Data_Model.Node) -> bool {
-    return node.kind == .OBJECT || node.kind == .ARRAY;
+    return node.kind == .OBJECT 
+        || node.kind == .ARRAY;
+}
+
+// Currently, this is really only applicable to XML
+contains_only_character_data :: (node: *Data_Model.Node) {
+    return node.kind == .OBJECT 
+        && node.children.count == 1
+        && node.children.first.kind == .CHARACTER_DATA;
 }
 
 // ===== Navigating the Data_Model =====

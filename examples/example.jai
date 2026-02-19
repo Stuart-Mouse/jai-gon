@@ -4,9 +4,65 @@
 #import "Reflection";
 #import "String";
 
-#import "GON"()(LANGUAGES=string.["JSON"]);
+#import "GON"()(LANGUAGES=string.["JSON", "XML"]);
+
 
 main :: () {
+    // test_json();
+    test_xml();
+}
+
+test_xml :: () {
+    write_string("===== Example 1: the basics =====\n");
+    {
+        // Suppose we have the following JSON file:
+        file :: #string END
+        <root>
+            <my_int>5</my_int>
+            <foo>
+                <my_float>3.5</my_float>
+                <my_string>this is a string</my_string>
+            </foo>
+        </root>
+        END
+        
+        
+        model: Data_Model;
+        init_data_model(*model);
+        defer deinit_data_model(*model);
+        
+        model.language = JSON_get_language();
+        
+        ok := parse_file(*model, file, "Example 1");
+        if !ok  return;
+        
+        // Now we want to extract some information from this file into the following variables:
+        my_int:     int;
+        my_float:   float;
+        my_string:  string;
+        
+        // So we create data bindings with the variables and the path to the data in the file:
+        ok = add_data_bindings(*model, 
+            .{ my_int,    "my_int"        },
+            .{ my_float,  "foo/my_float"  },
+            .{ my_string, "foo/my_string" },
+        );
+        if !ok  return;
+        
+        // After processing our data bindings, the variables we bound will have their values filled in.
+        ok = process_data_bindings(*model);
+        if !ok  return;
+        
+        
+        print("my_int:    %\n", my_int);
+        print("my_float:  %\n", my_float);
+        print("my_string: \"%\"\n", my_string);
+    }
+    write_string("\n\n");
+    
+}
+
+test_json :: () {
     
     TEST_GON :: true;
     
