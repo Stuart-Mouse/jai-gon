@@ -12,26 +12,27 @@ JSON_Serialize_Flags :: enum_flags {
     IS_FIRST_CHILD;
 }
 
-JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node) -> bool {
-    return JSON_serialize_node(builder, model, node, 0, .IS_FIRST_CHILD);
+json_serialize :: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node) -> bool {
+    return json_serialize(builder, model, node, 0, .IS_FIRST_CHILD);
 }
 
-JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node, indent: int, flags: JSON_Serialize_Flags) -> bool {
+// internal version, takes additional parameters
+json_serialize :: (builder: *String_Builder, model: *Data_Model, node: *Data_Model.Node, indent: int, serialization_flags: JSON_Serialize_Flags) -> ok: bool, skipped := false {
     using json_context := model.language.language_context.(*JSON_Context);
     
     if node == null  return false;
     
     io_data := get_io_data(model, node.binding.type);
     
-    if (flags & .SKIP_IF_EMPTY) || (io_data && (io_data.flags & .SKIP_IF_EMPTY)) {
+    if (serialization_flags & .SKIP_IF_EMPTY) || (io_data && (io_data.flags & .SKIP_IF_EMPTY)) {
         if all_bytes_are_zero(node.binding) {
-            return true;
+            return true, skipped = true;
         }
     }
     
-    same_line := (flags & .SAME_LINE).(bool);
+    same_line := (serialization_flags & .SAME_LINE).(bool);
     
-    if !(flags & .IS_FIRST_CHILD) {
+    if !(serialization_flags & .IS_FIRST_CHILD) {
         append(builder, ",");
     }
     
@@ -42,12 +43,11 @@ JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Dat
         for 0..indent-1  append(builder, indentation_string);
     }
     
-    // TODO: 
     if node.parent.kind != .ARRAY {
-        omit_quotes := (json_flags & .PERMIT_IDENTIFIERS_AS_KEYS) && lexer.is_legal_identifier(node.name);
+        omit_quotes := (flags & .PERMIT_IDENTIFIERS_AS_KEYS) && lexer.is_legal_identifier(node.name);
         if omit_quotes
             then append(builder, node.name);
-            else JSON_append_string(builder, node.name);
+            else json_append_string(builder, node.name);
         append(builder, ": ");
     }
     
@@ -73,8 +73,9 @@ JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Dat
             
         // enum_index_type := ifx io_data then io_data.enum_index_type;
         for node.children {
-            if !#this(builder, model, it, indent + 1, child_flags)  return false;
-            child_flags &= ~.IS_FIRST_CHILD;
+            ok, skipped := #this(builder, model, it, indent + 1, child_flags);
+            if !ok       return false;
+            if !skipped  child_flags &= ~.IS_FIRST_CHILD;
         }
         
         if same_line {
@@ -92,9 +93,9 @@ JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Dat
         
       case .FIELD;
         if node.binding.type {
-            JSON_append_field_value(builder, node.binding);
+            json_append_field_value(builder, node.binding);
         } else if node.string_value {
-            JSON_append_field_value(builder, node.string_value);
+            json_append_field_value(builder, node.string_value);
         } else {
             log("Error: no value defined for node '%v'\n", format_node_path(model, node));
             return false;
@@ -104,23 +105,23 @@ JSON_serialize_node :: (builder: *String_Builder, model: *Data_Model, node: *Dat
     return true;
 }
 
-JSON_append_string :: (builder: *String_Builder, text: string, quote_char: u8 = "\"") -> bool {
+json_append_string :: (builder: *String_Builder, text: string, quote_char: u8 = "\"") -> bool {
     append(builder, quote_char);
     ok := unescape_string(builder, text);
     append(builder, quote_char);
     return ok;
 }
 
-JSON_append_field_value :: (builder: *String_Builder, value: Any, io_data: *IO_Data = null, quote_char: u8 = "\"") -> bool {
+json_append_field_value :: (builder: *String_Builder, value: Any, io_data: *IO_Data = null, quote_char: u8 = "\"") -> bool {
     if io_data && io_data.to_string {
         ok, string_value := io_data.to_string(value);
-        JSON_append_string(builder, string_value);
+        json_append_string(builder, string_value);
         return ok;
     }
     
     if value.type.type == {
       case .STRING;
-        JSON_append_string(builder, value.value_pointer.(*string).*);
+        json_append_string(builder, value.value_pointer.(*string).*);
         
       case .INTEGER;    #through;
       case .FLOAT;      #through;
@@ -141,7 +142,7 @@ JSON_append_field_value :: (builder: *String_Builder, value: Any, io_data: *IO_D
         assert(array_info.element_type.runtime_size == 1);
         
         count, data := get_array_count_and_data(array_info, value.value_pointer);
-        JSON_append_string(builder, string.{ count, data });
+        json_append_string(builder, string.{ count, data });
     }
     return true;
 }

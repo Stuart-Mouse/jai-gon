@@ -1,13 +1,15 @@
 // raddbg 0.9.21 project file
 
-recent_file: path: "../Utils/scanner.jai"
-recent_file: path: "../Basic/String_Builder.jai"
-recent_file: path: "languages/JSON/serialize.jai"
-recent_file: path: "module.jai"
-recent_file: path: "examples/example.jai"
 recent_file: path: "data_model.jai"
-recent_file: path: "../Utils/type_info.jai"
+recent_file: path: "languages/JSON/serialize.jai"
+recent_file: path: "../Basic/String_Builder.jai"
+recent_file: path: "examples/example.jai"
 recent_file: path: "path.jai"
+recent_file: path: "languages/XML/submodule.jai"
+recent_file: path: "utils.jai"
+recent_file: path: "module.jai"
+recent_file: path: "../Utils/scanner.jai"
+recent_file: path: "../Utils/type_info.jai"
 recent_file: path: "languages/GON/parse.jai"
 recent_file: path: "languages/GON/lexer.jai"
 target:
@@ -16,5 +18,13 @@ target:
   working_directory: "examples/"
   enabled: 1
 }
-breakpoint: source_location: "examples/example.jai:215:1"
-breakpoint: source_location: "examples/example.jai:211:1"
+breakpoint:
+{
+  source_location: "languages/JSON/serialize.jai:76:1"
+  hit_count: 0
+}
+breakpoint:
+{
+  source_location: "data_model.jai:501:1"
+  hit_count: 1
+}

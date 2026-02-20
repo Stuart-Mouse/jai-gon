@@ -45,10 +45,11 @@ make_scanner :: (file: string, file_path: string) -> Scanner {
 }
 
 // advances UP TO the amount specified, returns false on EOF
-advance :: inline (using scanner: *Scanner, amount := 1) -> bool {
+advance :: (using scanner: *Scanner, amount := 1) -> bool {
     assert(amount >= 0);
     _amount := min(amount, file.count);
     
+    // TODO: need to make sure that this check for newline is correct in utf8!
     for 0.._amount-1 {
         if file[it] == "\n" {
             location.line_number += 1;
@@ -86,14 +87,12 @@ default_is_legal_identifier :: (str: string) -> bool {
 }
 
 default_skip_whitespace :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    while is_any(file[0], whitespace_characters) {
-        if !advance(scanner) return false;
-    }
+    while is_any(file[0], whitespace_characters) && advance(scanner) { }
     return true;
 }
 
 skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    if file.count == 0 return false;
+    if file.count == 0 return true;
     while true {
         while is_any(file[0], whitespace_characters) {
             if !advance(scanner) return false;

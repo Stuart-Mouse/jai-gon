@@ -41,7 +41,7 @@ init_lexer :: (lexer: *JSON_Lexer, config: JSON_Lexer_Config, file: string, file
     get_token(lexer);
 }
 
-get_token :: inline (using lexer: *JSON_Lexer) -> JSON_Token {
+get_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
     if next_token.kind == .ERROR {
         return next_token;
     }
@@ -51,18 +51,15 @@ get_token :: inline (using lexer: *JSON_Lexer) -> JSON_Token {
     return current_token;
 }
 
-peek_token :: inline (using t: *JSON_Lexer) -> JSON_Token {
-    return next_token;
-}
-
-make_error_token :: (message: string = "", location: Source_Code_Location) -> JSON_Token { 
-    return .{ .ERROR, message, location }; 
+peek_token :: (lexer: *JSON_Lexer) -> JSON_Token {
+    return lexer.next_token;
 }
 
 lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
-    if !lexer.skip_whitespace(lexer, whitespace_characters)  return .{ kind = .EOF };
-    token_location := lexer.location;
+    if !lexer.skip_whitespace(lexer, whitespace_characters)  return .{ .ERROR, "Unexpected EOF.", lexer.location };
+    if !lexer.file  return .{ kind = .EOF };
     
+    token_location := lexer.location;
     return_error :: (message: string = "") #expand { `return .{ .ERROR, message, token_location }; }
     
     // single character tokens
@@ -137,7 +134,7 @@ lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
     return_error("Unexpected character encountered.");
 }
 
-JSON_try_lex_number :: (using scanner: *Scanner) -> bool, string {
+json_try_lex_number :: (using scanner: *Scanner) -> bool, string {
     if !file  return true, "";
     
     start := file.data;

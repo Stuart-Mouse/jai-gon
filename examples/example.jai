@@ -4,21 +4,21 @@
 #import "Reflection";
 #import "String";
 
-#import "GON"()(LANGUAGES=string.["JSON", "XML"]);
+#import "GON";
 
 
 main :: () {
-    // test_json();
+    test_json();
     test_xml();
 }
 
 test_xml :: () {
     write_string("===== Example 1: the basics =====\n");
     {
-        // Suppose we have the following JSON file:
+        // Suppose we have the following XML file:
         file :: #string END
         <root>
-            <my_int>5</my_int>
+            <my_int value="5"/>
             <foo>
                 <my_float>3.5</my_float>
                 <my_string>this is a string</my_string>
@@ -31,7 +31,7 @@ test_xml :: () {
         init_data_model(*model);
         defer deinit_data_model(*model);
         
-        model.language = JSON_get_language();
+        model.language = xml_get_language();
         
         ok := parse_file(*model, file, "Example 1");
         if !ok  return;
@@ -82,7 +82,7 @@ test_json :: () {
         init_data_model(*model);
         defer deinit_data_model(*model);
         
-        model.language = JSON_get_language();
+        model.language = json_get_language();
         
         ok := parse_file(*model, file, "Example 1");
         if !ok  return;
@@ -163,7 +163,7 @@ test_json :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language(.{json_flags = .DEFAULT_GON_FLAGS});
+        model.language = json_get_language(.{flags = .DEFAULT_GON_FLAGS});
         
         ok = parse_file(*model, file, file_path);
         if !ok  return;
@@ -274,7 +274,7 @@ test_json :: () {
         defer deinit_data_model(*model);
         
         model.io_data_table = *my_io_data;
-        model.language = JSON_get_language(.{json_flags = .DEFAULT_GON_FLAGS});
+        model.language = json_get_language(.{flags = .DEFAULT_GON_FLAGS});
         
         // Uncomment this line to see Vector3 serialized as a GON array instead of a GON object.
         add_io_data(*my_io_data, Vector3, .{ preferred_node_kind_for_serialization = .ARRAY });

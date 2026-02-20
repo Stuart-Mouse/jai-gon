@@ -24,6 +24,6 @@ report_error :: (model: *Data_Model, location: Source_Code_Location, format: str
 
 report_error :: (model: *Data_Model, node: *Data_Model.Node, format: string, args: ..Any) {
     location := ifx node then node.location;
-    report_error(model, location, format, args);
+    report_error(model, location, format, ..args);
 } @PrintLike
 

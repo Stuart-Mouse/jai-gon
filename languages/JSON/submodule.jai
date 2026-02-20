@@ -1,33 +1,29 @@
 
-JSON_get_language :: (config := JSON_Config.{}) -> Language {
-    ctx := New(JSON_Context);
-    ctx.config = config;
+JSON_LANGUAGE_ID :: "JSON";
+
+json_get_language :: (config := JSON_Config.{}) -> Language {
+    language_context := New(JSON_Context);
+    language_context.config = config;
     
     return .{
+        language_context  = language_context,
         name              = "JSON",
         id                = JSON_LANGUAGE_ID,
-        language_context  = ctx,
-        parse             = JSON_parse,
-        serialize_node    = JSON_serialize_node,
-        deinit            = JSON_deinit_language,
+        parse             = json_parse,
+        serialize         = json_serialize,
+        deinit            = json_deinit_language,
     };
-}
-
-JSON_deinit_language :: (model: *Data_Model) {
-    ctx := model.language.language_context.(*JSON_Context);
-    free(ctx);
 }
 
 JSON_Context :: struct {
     using config: JSON_Config;
-    
-    lexer:  JSON_Lexer;
+    lexer: JSON_Lexer;
 }
 
 JSON_Config :: struct {
     using lexer_config: JSON_Lexer_Config;
     
-    json_flags: Flags;
+    flags: Flags;
     Flags :: enum_flags {
         NONE :: 0;
         
@@ -53,7 +49,7 @@ JSON_Config :: struct {
 //       Or maybe we can do something with context to make this nicer all around, because now I am also thinking about what if we want the scanner to have access to the language config and whatnot. But maybe that's a bridge too far anyhow... I dunno. I am tired.
 JSON_Lexer_Config :: struct {
     skip_whitespace                 := default_skip_whitespace;
-    try_lex_number                  := JSON_try_lex_number;
+    try_lex_number                  := json_try_lex_number;
     try_lex_identifier              := default_try_lex_identifier;
     is_legal_identifier             := default_is_legal_identifier;
     permitted_quotation_characters  := "\"";
@@ -62,9 +58,15 @@ JSON_Lexer_Config :: struct {
 
 #scope_module
 
-JSON_LANGUAGE_ID :: "JSON";
+#load "serialize.jai";
+#load "lexer.jai";
 
-JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", into: *Data_Model.Node = null) -> bool {
+json_deinit_language :: (model: *Data_Model) {
+    ctx := model.language.language_context.(*JSON_Context);
+    free(ctx);
+}
+
+json_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", into: *Data_Model.Node = null) -> bool {
     using json_context := model.language.language_context.(*JSON_Context);
     
     init_lexer(*lexer, lexer_config, file, file_path_for_logging);
@@ -115,7 +117,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             get_token(*lexer);
             
           case;
-            if parent.children.count != 0 && (!json_flags & .DONT_REQUIRE_COMMAS) {
+            if parent.children.count != 0 && (!flags & .DONT_REQUIRE_COMMAS) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -126,12 +128,12 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             next_token = get_token(*lexer);
             if next_token.kind == {
               case .IDENTIFIER; 
-                if !(json_flags & .PERMIT_IDENTIFIERS_AS_KEYS) {
+                if !(flags & .PERMIT_IDENTIFIERS_AS_KEYS) {
                     log_unexepected_token(next_token);
                 }
                 
               case .NUMBER;
-                if !(json_flags & .PERMIT_NUMBERS_AS_KEYS) {
+                if !(flags & .PERMIT_NUMBERS_AS_KEYS) {
                     log_unexepected_token(next_token);
                 }
                 
@@ -149,7 +151,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             next_token = peek_token(*lexer);
             if next_token.kind == .COLON {
                 get_token(*lexer);
-            } else if (!json_flags & .DONT_REQUIRE_COLONS) {
+            } else if (!flags & .DONT_REQUIRE_COLONS) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -168,7 +170,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             // Not setting value for now. Need to determine how to handle this properly.
             
           case .IDENTIFIER;
-            if !(json_flags & .PERMIT_IDENTIFIERS_AS_VALUES) {
+            if !(flags & .PERMIT_IDENTIFIERS_AS_VALUES) {
                 log_unexepected_token(next_token);
                 return false;
             }
@@ -204,7 +206,7 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
             
           case .FIELD;
             // next_token = peek_token(*lexer);
-            // if json_flags & .PERMIT_MULTI_VALUED_FIELDS && next_token.kind == .VALUE_SEPARATOR {
+            // if flags & .PERMIT_MULTI_VALUED_FIELDS && next_token.kind == .VALUE_SEPARATOR {
             //     get_token(*lexer);
             //     parent = node;
                 
@@ -218,8 +220,4 @@ JSON_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", in
     
     return true;
 }
-
-
-#load "serialize.jai";
-#load "lexer.jai";
 

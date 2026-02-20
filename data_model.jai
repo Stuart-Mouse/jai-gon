@@ -19,7 +19,7 @@ Data_Model :: struct {
     root:               *Node;
     io_data_table:      *IO_Data_Table;
     
-    memory_pool:        Flat_Pool;  // TODO: Give user control over the pool type used. Needs to match a specific interface.
+    memory_pool:        Flat_Pool;  // TODO: Just allow user to set any Allocator here, and make sure we free nodes individually if the allocator does not support freeing all at once. 
     node_free_list:     Node_List;
     
     last_error_string:  string;     // NOTE: allocated with temporary allocator
@@ -42,12 +42,15 @@ Data_Model :: struct {
         Kind :: enum { 
             UNINITIALIZED   :: 0;
             
+            // JSON
             FIELD           :: 1;
             OBJECT          :: 2;
             ARRAY           :: 3;
             
-            ATTRIBUTE       :: 4;
-            CHARACTER_DATA  :: 5;
+            // XML
+            TAG             :: 4;
+            ATTRIBUTE       :: 5;
+            CHARACTER_DATA  :: 6;
         }
     }
     
@@ -101,10 +104,10 @@ for_expansion :: (list: *Data_Model.Node_List, body: Code, $flags: For_Flags) #e
     }
 }
 
-maybe_get_default :: inline (model: *Data_Model, insertion_behaviour: Data_Model.Node_Insertion_Behaviour.Mode) -> Data_Model.Node_Insertion_Behaviour.Mode {
-    return ifx insertion_behaviour.mode == .LANGUAGE_DEFAULT 
-        then model.language.default_node_insertion_behaviour
-        else insertion_behaviour;
+maybe_get_default :: inline (model: *Data_Model, insertion_mode: Data_Model.Node_Insertion_Behaviour.Mode) -> Data_Model.Node_Insertion_Behaviour.Mode {
+    return ifx insertion_mode == .LANGUAGE_DEFAULT 
+        then model.language.default_node_insertion_behaviour.mode
+        else insertion_mode;
 }
 
 init_data_model :: (model: *Data_Model) {
@@ -118,15 +121,11 @@ deinit_data_model :: (model: *Data_Model) {
 }
 
 is_aggregate :: (node: *Data_Model.Node) -> bool {
-    return node.kind == .OBJECT 
-        || node.kind == .ARRAY;
+    return node.children.count != 0;
 }
 
-// Currently, this is really only applicable to XML
-contains_only_character_data :: (node: *Data_Model.Node) {
-    return node.kind == .OBJECT 
-        && node.children.count == 1
-        && node.children.first.kind == .CHARACTER_DATA;
+contains_only_character_data :: (node: *Data_Model.Node) -> bool {
+    return !is_aggregate(node) || node.children.first.kind == .CHARACTER_DATA;
 }
 
 // ===== Navigating the Data_Model =====
@@ -154,7 +153,7 @@ find_node :: (model: *Data_Model, cursor: *Data_Model.Node, pathfinder: *Pathfin
 }
 
 get_child_node_by_name :: (parent: *Data_Model.Node, name: string) -> *Data_Model.Node, int {
-    if !is_aggregate(parent)  return null, -1;
+    // if !is_aggregate(parent)  return null, -1;
     
     for parent.children
         if it.name == name
@@ -164,7 +163,8 @@ get_child_node_by_name :: (parent: *Data_Model.Node, name: string) -> *Data_Mode
 }
 
 get_child_node_by_index :: (parent: *Data_Model.Node, index: int) -> *Data_Model.Node, int {
-    if !is_aggregate(parent) || index > parent.children.count  return null, -1;
+    // if !is_aggregate(parent) || index > parent.children.count  return null, -1;
+    if index > parent.children.count  return null, -1;
     
     // TODO: Could optimize by indexing from back when that would require fewer steps.
     child := parent.children.first;
@@ -176,7 +176,7 @@ get_child_node_by_index :: (parent: *Data_Model.Node, index: int) -> *Data_Model
 // ===== Inserting and Removing Nodes =====
 
 // NOTE: Once the first node is inserted at the given path, the binding will create new child nodes recursively for all struct members and array elements.
-insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path: string, binding: Any, override_kind := Data_Model.Node.Kind.UNINITIALIZED, insertion_behaviour := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {    
+insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path: string, binding: Any, override_kind := Data_Model.Node.Kind.UNINITIALIZED, insertion_mode := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {    
     if parent == null {
         ensure_root_node_exists(model);
         parent = model.root;
@@ -192,9 +192,9 @@ insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path:
     
     node: *Data_Model.Node;
     if path {
-        node = insert_node_with_path(model, parent, path, node_kind, insertion_behaviour);
+        node = insert_node_with_path(model, parent, path, node_kind, insertion_mode);
     } else {
-        node = insert_child_node(model, parent, "", node_kind, insertion_behaviour.flags & .PREPEND == .PREPEND);
+        node = insert_child_node(model, parent, "", node_kind, insertion_mode.flags & .PREPEND == .PREPEND);
     }
     if node == null  return node;
     
@@ -211,7 +211,7 @@ insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path:
             
             structure := Any_Structure.{ xx base_type, binding.value_pointer };
             for structure {
-                #this(model, node, it_info.name, it, insertion_behaviour = insertion_behaviour);
+                #this(model, node, it_info.name, it, insertion_mode = insertion_mode);
             }
             
           case .ARRAY;
@@ -223,7 +223,7 @@ insert_node_with_binding :: (model: *Data_Model, parent: *Data_Model.Node, path:
             
             for array {
                 name := ifx get_name then get_name(it);
-                #this(model, node, name, it, insertion_behaviour = insertion_behaviour);
+                #this(model, node, name, it, insertion_mode = insertion_mode);
             }
             
           case;
@@ -255,48 +255,50 @@ maybe_insert_child_node :: (
     parent: *Data_Model.Node, 
     name: string, 
     kind: Data_Model.Node.Kind, 
-    insertion_behaviour := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR,
+    insertion_mode := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR,
 ) -> (
     node: *Data_Model.Node, 
-    returned_existing: bool
+    found_existing: bool
 ) {
     // if parent.kind != .OBJECT {
     //     log("Data Model Error: Cannot create a named child node on an array or field node.");
     //     return null;
     // }
     
-    mode  := maybe_get_default(model, insertion_behaviour.mode);
-    flags := insertion_behaviour.flags;
+    mode  := maybe_get_default(model, insertion_mode.mode);
+    flags := insertion_mode.flags;
     
     node: *Data_Model.Node;
+    found_existing := false;
     
     if #complete mode == {
       case .OVERWRITE;
         // TODO: If we overwrite some node with children, we should 'free' those child nodes.
         //       This is not a big deal right now, because we don't actually *need* to free any nodes individually, 
         //       but maybe in the future I will add some mechanism to put 'freed' nodes on a freelist and recycle them where possible. (This should actually be very easy to do...)
-        node = find_child_node_by_name(parent, name);
-        node = .{ name = name, kind = kind, links = node.links }; // NOTE: It is important that we keep the existing links!
+        node = get_child_node_by_name(parent, name);
+        node.* = .{ name = name, kind = kind, links = node.links }; // NOTE: It is important that we keep the existing links!
         
       case .RETURN_EXISTING;
-        node = find_child_node_by_name(parent, name);
+        node = get_child_node_by_name(parent, name);
         
       case .ALLOW_DUPLICATES;
         // no op
         
       case .LANGUAGE_DEFAULT; 
-        unreachable();
+        assert(false, "unreachable");
     }
     
     // base case
     if node == null {
         node = insert_child_node(model, parent, name, kind, flags & .PREPEND == .PREPEND);
+    } else {
+        found_existing = true;
     }
-    
-    return node;
+    return node, found_existing;
 }
 
-insert_node_with_path :: (model: *Data_Model, cursor: *Data_Model.Node, path: string, kind := Data_Model.Node.Kind.UNINITIALIZED, insertion_behaviour := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {
+insert_node_with_path :: (model: *Data_Model, cursor: *Data_Model.Node, path: string, kind := Data_Model.Node.Kind.UNINITIALIZED, insertion_mode := Data_Model.DEFAULT_NODE_INSERTION_BEHAVIOUR) -> *Data_Model.Node {
     pathfinder := model.language.pathfinder;
     set_path(*pathfinder, path);
     
@@ -308,7 +310,7 @@ insert_node_with_path :: (model: *Data_Model, cursor: *Data_Model.Node, path: st
             
           case .STEP_INTO_BY_NAME;
             if is_final {
-                return insert_child_node(model, cursor, path_step.name, kind, insertion_behaviour.flags & .PREPEND == .PREPEND);
+                return insert_child_node(model, cursor, path_step.name, kind, insertion_mode.flags & .PREPEND == .PREPEND);
             } else {
                 cursor = get_child_node_by_name(cursor, path_step.name);
             }
@@ -316,7 +318,7 @@ insert_node_with_path :: (model: *Data_Model, cursor: *Data_Model.Node, path: st
             // TODO: Consider reimplementing logic like this to create empty objects if necessary, but only when some insertion flag is present.
             // child := find_child_node_by_name(cursor, path_step.name);
             // if child == null {
-            //     child = insert_child_node(node, insertion_behaviour.flags & .PREPEND == .PREPEND);
+            //     child = insert_child_node(node, insertion_mode.flags & .PREPEND == .PREPEND);
             //     child.name = path_step.name;
             //     child.kind = .OBJECT;
             // }
@@ -469,7 +471,13 @@ has_valid_binding :: (node: *Data_Model.Node) -> bool {
 
 add_data_binding :: (model: *Data_Model, binding: Any, path: string) -> bool {
     node := find_node(model, model.root, path);
-    return add_data_binding_to_node(model, node, binding);
+    // TODO: should warn when unable to find node
+    if node {
+        return add_data_binding_to_node(model, node, binding);
+    } else {
+        log("warning: unable to locate node: %", path);
+        return true;
+    }
 }
 
 add_data_bindings :: (model: *Data_Model, bindings: ..Binding_With_Path) -> bool {
@@ -490,23 +498,33 @@ process_node_binding :: (model: *Data_Model, node: *Data_Model.Node) -> bool {
         if io_data && io_data.set_name {
             io_data.set_name(node.binding, node.name);
         }
-        if node.string_value {
+        if node.string_value && contains_only_character_data(node) {
             if io_data && io_data.from_string {
                 if !io_data.from_string(node.binding, node.string_value) {
                     report_error(model, node, "User-defined from_string() proc for type '%' failed with string_value '%'", as_type(node.binding.type), node.string_value);
                     return false;
                 }
             } else {
-                if !set_value_from_string(node.binding, node.string_value)  return false;
+                if !set_value_from_string(node.binding, node.string_value) {
+                    log("failed to set value of % node '%' from string value: %", node.kind, node.name, node.string_value);
+                    return false;
+                }
             }
+            return true;
         }
     }
     
-    if node.children.count {
-        if node.kind == .FIELD {
-            if has_valid_binding(node) {
-                for node.children  if !set_value_from_string(node.binding, it.string_value)  return false;
-            }
+    if is_aggregate(node) {
+        /*
+            For now, regardless of the node type, if the node's binding is to a non-aggregate type then we act as if all child nodes chare this node's data binding.
+            Maybe this is not the best long-term approach and we should alter the logic here.
+            Also, note that strings are currently considered an aggregate type, so this will not result in repeatedly assigning to the same string value (which would likely cause memory leaks).
+            
+            The main reason for having this logic in place is for binding XML attribute values to their parent tags, and for potentially allowing multi-valued JSON fields as a language extensnion (for the sake of ergonomic enum flags in GON).
+        */
+        if has_valid_binding(node) 
+        && !is_aggregate(node.binding.type) {
+            for node.children  if !set_value_from_string(node.binding, it.string_value)  return false;
         } else {
             for node.children  if !process_node_binding(model, it)  return false;
         }
@@ -515,7 +533,6 @@ process_node_binding :: (model: *Data_Model, node: *Data_Model.Node) -> bool {
     return true;
 }
 
-
 add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding: Any) -> bool  {
     if has_valid_binding(node)  return true;
     
@@ -523,9 +540,6 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
         report_error(model, node, "Attempt to add data binding to node which already has an existing binding.");
         return false;
     }
-    
-    // TODO: instead of setting name member here, we will just call our io_data set_name() proc when we evaluate data bindings
-    //       this solves the mutlitple-assignment issue naturally, since the user can just check the existing value before 
     
     node.binding = binding;
     io_data := get_io_data(model, node.binding.type);
@@ -543,6 +557,9 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
     
     // make indirect bindings onto child nodes
     if node.kind == {
+      case .TAG;
+        #through;
+        
       case .OBJECT;
         if binding.type.type == {
           case .STRUCT;
@@ -591,8 +608,11 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             }
             
           case;
-            report_error(model, node, "Cannot bind object node to data of type %.", as_type(node.binding.type));
-            return false;
+            // NOTE: we have to check this because of the fallthrough from the TAG case.
+            if node.kind == .OBJECT {
+                report_error(model, node, "Cannot bind object node to data of type %.", as_type(node.binding.type));
+                return false;
+            }
         }
         
         
@@ -684,13 +704,11 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
 }
 
 
-#scope_module
-
 get_allocator :: (model: *Data_Model) -> Allocator {
     return .{ flat_pool_allocator_proc, *model.memory_pool };
 }
 
-// TODO: should probably override on a per-language basis...
+// TODO: Need to allow user to replace this, should probably also be able to override on a per-language basis...
 set_value_from_string :: (value: Any, text: string, should_copy_strings := true) -> bool {
     if text.count <= 0  return true;
     
@@ -707,7 +725,7 @@ set_value_from_string :: (value: Any, text: string, should_copy_strings := true)
         return true;
     } 
     
-    return Convert.set_value_from_string(value, text, should_copy_strings);
+    return Reflection.set_value_from_string(value, text);
 }
 
 ensure_root_node_exists :: (model: *Data_Model) {

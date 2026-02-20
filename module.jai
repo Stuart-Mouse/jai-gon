@@ -14,8 +14,43 @@
     
 */
 
+// TODO: once the compiler bug that generate dumb warnings is fixed, it woudl be nice to reinstate this module_parameters stuff.
+//       But for now it is too much hassle, so instead users can just manaully exclude the languages they don't care about here by commenting out the #loads.
 
-#module_parameters ()(LANGUAGES: [] string);
+#load "languages/JSON/submodule.jai";
+#load "languages/XML/submodule.jai";
+
+// #module_parameters ()(LANGUAGES: [] string);
+
+// #insert #run,stallable -> string {
+//     builder: String_Builder;
+//     for LANGUAGES {
+//         find_submodule_and_append(*builder, "languages", it);
+//     }
+//     result := builder_to_string(*builder,, temp);
+//     return result;
+// };
+
+// find_submodule_and_append :: (builder: *String_Builder, submodule_directory: string, submodule_name: string, loc := #caller_location) #compile_time {
+//     module_directory := path_strip_filename(loc.fully_pathed_filename);
+    
+//     // try importing single-file submodule
+//     submodule_file_path := tprint("%/%/%.jai", module_directory, submodule_directory, submodule_name);
+//     if file_exists(submodule_file_path) {
+//         print(builder, "% :: #import,file \"%\";\n", submodule_name, submodule_file_path);
+//         return;
+//     }
+    
+//     // try importing folder-based submodule
+//     submodule_file_path = tprint("%/%/%/submodule.jai", module_directory, submodule_directory, submodule_name);
+//     if file_exists(submodule_file_path) {
+//         print(builder, "% :: #import,file \"%\";\n", submodule_name, submodule_file_path);
+//         return;
+//     }
+    
+//     assert(false, "Unable to locate submodule '%' in '%/%'.", submodule_name, module_directory, submodule_directory);
+// }
+
 
 // ========== Parsing ==========
 
@@ -65,12 +100,16 @@
 //     return model, ok;
 // }
 
+// TODO: add version of load_and_parse_file that infers the language automatically based on the file extension.
+//       we will need to have some global lookup table to associate a file extension with a particular file type
+//       user will need to register the language file associations with language ID and some default config, since maybe the file extension will indicate to use some different language config, e.g. JSON vs GON
+
 parse_file :: (model: *Data_Model, file: string, file_path_for_logging := "") -> bool {
     if !model.language.parse {
         log("Data Model Error: language does not implement parse()!"); 
         return false;
     }
-    if !model.language.parse(model, file, file_path_for_logging) {
+    if !model.language.parse(model, file, file_path_for_logging, null) {
         log("Data Model Error: Failed to parse file: %", file_path_for_logging);
         return false;
     }
@@ -102,7 +141,7 @@ serialize_to_builder :: (using model: *Data_Model, builder: *String_Builder) -> 
     if model.root == null  return false;
     
     for model.root.children 
-        if !model.language.serialize_node(builder, model, it)
+        if !model.language.serialize(builder, model, it)
             return false;
     
     return true;
@@ -122,7 +161,7 @@ serialize_to_builder :: (using model: *Data_Model, builder: *String_Builder) -> 
 // I have no idea why next_power_of_two is #scope_export...
 using,except(next_power_of_two) Hash_Table :: #import "Hash_Table";
 
-Convert :: #import "Convert";
+Reflection :: #import "Reflection";
 #import "Reflect";
 
 #load "data_model.jai";
@@ -131,43 +170,4 @@ Convert :: #import "Convert";
 #load "path.jai";
 #load "log.jai";
 #load "utils.jai";
-
-// TODO: While we still get this weird compiler warning due to inserting a #load, we should just read the entire file and insert the contents here. 
-//       I don't exactly like that, but it's probably better than getting weird compiler warnings every compile.
-#insert #run,stallable -> string {
-    builder: String_Builder;
-    for LANGUAGES {
-        find_submodule_and_append(*builder, "languages", it);
-    }
-    result := builder_to_string(*builder,, temp);
-    return result;
-};
-
-// #insert #run,stallable -> string {
-//     builder: String_Builder;
-//     for TYPES {
-//         find_submodule_and_append(*builder, "types", it);
-//     }
-//     return builder_to_string(*builder,, temp);
-// };
-
-find_submodule_and_append :: (builder: *String_Builder, submodule_directory: string, submodule_name: string, loc := #caller_location) #compile_time {
-    module_directory := path_strip_filename(loc.fully_pathed_filename);
-    
-    // try importing single-file submodule
-    submodule_file_path := tprint("%/%/%.jai", module_directory, submodule_directory, submodule_name);
-    if file_exists(submodule_file_path) {
-        print(builder, "#load \"%/%.jai\";", submodule_directory, submodule_name);
-        return;
-    }
-    
-    // try importing folder-based submodule
-    submodule_file_path = tprint("%/%/%/submodule.jai", module_directory, submodule_directory, submodule_name);
-    if file_exists(submodule_file_path) {
-        print(builder, "#load \"%/%/submodule.jai\";", submodule_directory, submodule_name);
-        return;
-    }
-    
-    assert(false, "Unable to locate submodule '%' in '%/%'.", submodule_name, module_directory, submodule_directory);
-}
 

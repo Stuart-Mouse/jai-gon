@@ -28,17 +28,31 @@ JSON
     [ ] test cases
 
 
+XML
+    [ ] parse attributes
+        [ ] add proper handling for xml node types in data model
+    [ ] parse CDATA
+    [ ] parse header stuff
+    [ ] add serialization
+
 Languages to Add:
+    XML
     Human JSON (just add config flags for json)
     YAML (1.2)
-    XML
     TOML
+
+dependencies
+    figure out what to do about set_value_from_string
+    try to clean up utils file and maybe put that stuff in a parser utils module. i dunno.
 
 
 Marshaller (for immediate-mode data processing)
 
 
 support parsing of hex floats in parse_number
+
+
+
 
 
 
