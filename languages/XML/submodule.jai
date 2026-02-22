@@ -49,7 +49,7 @@ xml_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", int
     
     init_lexer(*lexer, file, file_path_for_logging);
     
-    while lexer.file {
+    while !is_eof(*lexer) {
         if into == null {
             // TODO: parse other top-level elements in document
         }
@@ -63,7 +63,7 @@ xml_parse :: (model: *Data_Model, file: string, file_path_for_logging := "", int
 xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool {
     using xml_context := model.language.language_context.(*XML_Context);
     
-    if lexer.file[0] == "<" {
+    if next_byte(*lexer) == "<" {
         tag_location := lexer.location;
         if !advance(*lexer) {
             report_error(model, lexer.location, "unexpected EOF while parsing start tag in XML document");  
@@ -86,11 +86,12 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
             ensure_root_node_exists(model);
             tag_node = model.root;
         } else {
-            tag_node=, is_duplicate := maybe_insert_child_node(model, ifx parent_tag else model.root, tag_name, .TAG);
-            if is_duplicate {
-                report_error(model, tag_location, "duplicate tags are not allowed!");
+            existing_node := get_child_node_by_name(parent_tag, tag_name);
+            if existing_node && existing_node.kind == .TAG {
+                report_error(model, tag_location, "duplicate tag '%' encountered", tag_name);
                 return false;
             }
+            tag_node = insert_child_node(model, ifx parent_tag else model.root, tag_name, .TAG);
         }
         tag_node.location = tag_location;
         
@@ -98,12 +99,12 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
         while parse_attributes := true {
             if !xml_skip_whitespace(*lexer)  return false;
             
-            if begins_with(lexer.file, "/>") {
-                advance(lexer.file, 2);
+            if begins_with(*lexer, "/>") {
+                advance(*lexer, 2);
                 return true;
             }
             
-            if lexer.file[0] == ">" {
+            if next_byte(*lexer) == ">" {
                 if !advance(*lexer) {
                     report_error(model, lexer.location, "unexpected EOF while parsing tag contents in XML document");  
                     return false;
@@ -114,34 +115,32 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
             if !xml_try_parse_attribute(model, tag_node)  return false;
         }
         
-        tag_value_begin := lexer.file.data;
+        tag_value_begin := lexer.cursor;
         
-        character_data_location := lexer.location;
-        character_data_substring := string.{ 0, lexer.file.data };
+        
+        character_data_start := get_marker(lexer);
         
         while true {
-            commit_character_data :: () #expand {
+            if next_byte(*lexer) == "<" {
+                // commit pending character data section
+                character_data_substring := substring_from_marker(*lexer, character_data_start);
                 character_data_substring = trim(character_data_substring, XML_WHITESPACE_CHARACTERS);
                 if character_data_substring {
                     character_data_node := insert_child_node(model, tag_node, "", .CHARACTER_DATA);
-                    character_data_node.location     = character_data_location;
+                    character_data_node.location     = character_data_start.location;
                     character_data_node.string_value = character_data_substring;
                 }
-                character_data_substring = "";
-            }
-            
-            if lexer.file[0] == "<" {
-                commit_character_data();
+                character_data_start = .{};
                 
                 // Check for closing tag
-                if lexer.file.count > 1 && lexer.file[1] == "/" {
-                    tag_value_end := lexer.file.data;
+                if bytes_remaining(*lexer) > 1 && (lexer.cursor + 1).* == "/" {
+                    tag_value_end := lexer.cursor;
                     
                     if !advance(*lexer, 2) {
                         report_error(model, lexer.location, "unexpected EOF while parsing end tag in XML document");  
                         return false;
                     }
-                    if !begins_with(lexer.file, tag_name) {
+                    if !begins_with(*lexer, tag_name) {
                         report_error(model, lexer.location, "mismatched end tag in XML document");
                         return false;
                     }
@@ -150,13 +149,13 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
                         return false;
                     }
                     if !xml_skip_whitespace(*lexer)  return false;
-                    if lexer.file[0] != ">" {
+                    if next_byte(*lexer) != ">" {
                         report_error(model, lexer.location, "expected `>` or `/>` to close end tag");
                         return false;
                     }
                     advance(*lexer);
                     
-                    tag_node.string_value = string.{ tag_value_end - tag_value_begin, tag_value_begin };
+                    tag_node.string_value = make_string_from_range(tag_value_begin, tag_value_end);
                     return true;
                 }
                 
@@ -164,30 +163,28 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
             }
             
             // begin a new character data substring if we are not currently constructing one
-            character_data_substring.data = ifx character_data_substring.data else lexer.file.data;
+            if character_data_start.cursor == null {
+                character_data_start = get_marker(lexer);
+            }
             
-            if lexer.file[0] == "&" {
+            if next_byte(*lexer) == "&" {
                 report_error(model, lexer.location, "TODO: character and entity references are not yet supported");
                 return false;
             }
             
-            codepoint, codepoint_length, utf8_decode_result := character_utf8_to_utf32(lexer.file.data, lexer.file.count);
-            if utf8_decode_result != .CONVERSION_OK { 
-                report_error(model, lexer.location, "utf8 decode error while parsing XML document");
+            rune := next_rune(*lexer);
+            if !rune && has_error(*lexer) { 
+                report_error(model, lexer.location, get_error_string(*lexer));
                 return false;
             }
-            
-            if !xml_is_valid_character(codepoint) {
+            if !xml_is_valid_character(rune) {
                 report_error(model, lexer.location, "invalid character encountered");
                 return false;
             }
-            
-            if !advance(*lexer, codepoint_length) {
+            if !advance(*lexer) {
                 report_error(model, lexer.location, "unexpected EOF in XML document while parsing character data");
                 return false;
             }
-            
-            character_data_substring.count += codepoint_length;
         }
     }
     
@@ -207,7 +204,7 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
     
     if !xml_skip_whitespace(*lexer)  return false;
     
-    if lexer.file[0] != "=" {
+    if next_byte(*lexer) != "=" {
         report_error(model, lexer.location, "expected an `=` after attribute name");
         return false;
     }
@@ -218,7 +215,7 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
     
     if !xml_skip_whitespace(*lexer)  return false;
     
-    quote_character := lexer.file[0];
+    quote_character := next_byte(*lexer);
     if !is_any(quote_character, "'\"") {
         report_error(model, lexer.location, "expected a single or double quotation mark character to begin attribute value");
     }
@@ -227,32 +224,36 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
         return false;
     }
     
-    attribute_value := string.{ 0, lexer.file.data };
-    while lexer.file[0] != quote_character {
-        codepoint, codepoint_length, utf8_decode_result := character_utf8_to_utf32(lexer.file.data, lexer.file.count);
-        if utf8_decode_result != .CONVERSION_OK { 
-            report_error(model, lexer.location, "utf8 decode error while parsing XML document");
+    attribute_value_start := lexer.cursor;
+    while next_byte(*lexer) != quote_character {
+        rune := next_rune(*lexer);
+        if !rune && has_error(*lexer) { 
+            report_error(model, lexer.location, get_error_string(*lexer));
             return false;
         }
-        
-        if !xml_is_valid_character(codepoint) {
+        if !xml_is_valid_character(rune) {
             report_error(model, lexer.location, "invalid character encountered");
             return false;
         }
-        
-        if !advance(*lexer, codepoint_length) {
-            report_error(model, lexer.location, "unexpected EOF in XML document while parsing string data");
+        if !advance(*lexer) {
+            report_error(model, lexer.location, "unexpected EOF in XML document while parsing attribute value");
             return false;
         }
     }
-    attribute_value.count = lexer.file.data - attribute_value.data;
+    attribute_value := make_string_from_range(attribute_value_start, lexer.cursor);
     
     if !advance(*lexer) {
         report_error(model, lexer.location, "unexpected EOF in XML document while parsing attribute");
         return false;
     }
     
-    attribute_node := insert_child_node(model, parent_tag, "", .ATTRIBUTE);
+    existing_node := get_child_node_by_name(parent_tag, attribute_name);
+    if existing_node && existing_node.kind == .ATTRIBUTE {
+        report_error(model, attribute_location, "duplicate attribute '%' encountered", attribute_name);
+        return false;
+    }
+    
+    attribute_node := insert_child_node(model, parent_tag, attribute_name, .ATTRIBUTE);
     attribute_node.location     = attribute_location;
     attribute_node.string_value = attribute_value;
     
@@ -275,8 +276,7 @@ XML_Lexer :: struct {
 XML_WHITESPACE_CHARACTERS :: " \t\r\n";
 
 init_lexer :: (lexer: *XML_Lexer, file: string, file_path_for_logging := "") {
-    lexer.file     = file;
-    lexer.location = .{ file_path_for_logging, 1, 1 };
+    init_scanner(lexer, file, file_path_for_logging);
 }
 
 xml_starts_name :: (char: u32) -> bool {
@@ -309,57 +309,61 @@ xml_continues_name :: (char: u32) -> bool {
 }
 
 xml_try_parse_name :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    assert(lexer.file.count > 0); // assuming this is always the case because of where we actually call this procedure
+    assert(!is_eof(lexer)); // assuming this is always the case because of where we actually call this procedure
     
-    name := string.{ 0, lexer.file.data };
+    name_start := lexer.cursor;
     
-    codepoint, codepoint_length, utf8_decode_result := character_utf8_to_utf32(lexer.file.data, lexer.file.count);
-    if utf8_decode_result != .CONVERSION_OK  return false, "utf8 decode error while parsing name";
+    rune := next_rune(lexer);
+    if !rune && has_error(lexer) { 
+        return false, get_error_string(lexer);
+    }
     
-    if !xml_starts_name(codepoint)  return true, "";
+    if !xml_starts_name(rune)  return true, "";
     
-    if !advance(lexer, codepoint_length)  return false, "unexpected EOF while parsing name";
+    if !advance(lexer)  return false, "unexpected EOF while parsing name";
     
     while true {
-        codepoint, codepoint_length, utf8_decode_result = character_utf8_to_utf32(lexer.file.data, lexer.file.count);
-        if utf8_decode_result != .CONVERSION_OK  return false, "utf8 decode error while parsing name";
-        
-        if xml_continues_name(codepoint) {
-            if !advance(lexer, codepoint_length)  return false, "unexpected EOF while parsing name";
+        rune := next_rune(lexer);
+        if !rune && has_error(lexer) { 
+            return false, get_error_string(lexer);
+        }
+        if xml_continues_name(rune) {
+            if !advance(lexer)  return false, "unexpected EOF while parsing name";
             continue;
         }
         break;
     }
     
-    name.count = lexer.file.data - name.data;
-    return true, name;
+    return true, make_string_from_range(name_start, lexer.cursor);
 }
 
 xml_try_parse_nametoken :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    assert(lexer.file.count > 0); // assuming this is always the case because of where we actually call this procedure
+    assert(!is_eof(lexer)); // assuming this is always the case because of where we actually call this procedure
     
-    name := string.{ 0, lexer.file.data };
+    name_start := lexer.cursor;
     
-    codepoint, codepoint_length, utf8_decode_result := character_utf8_to_utf32(file.data, file.count);
-    if utf8_decode_result != .CONVERSION_OK  return false, "utf8 decode error while parsing nametoken";
+    rune := next_rune(lexer);
+    if !rune && has_error(lexer) { 
+        return false, get_error_string(lexer);
+    }
     
-    if !xml_continues_name(codepoint)  return true, "";
+    if !xml_continues_name(rune)  return true, "";
     
-    if !advance(lexer, codepoint_length)  return false, "unexpected EOF while parsing nametoken";
+    if !advance(lexer)  return false, "unexpected EOF while parsing name";
     
     while true {
-        codepoint, codepoint_length, utf8_decode_result = character_utf8_to_utf32(file.data, file.count);
-        if utf8_decode_result != .CONVERSION_OK  return false, "utf8 decode error while parsing nametoken";
-        
-        if xml_continues_name(it) {
-            if !advance(lexer, codepoint_length)  return false, "unexpected EOF while parsing nametoken";
+        rune := next_rune(lexer);
+        if !rune && has_error(lexer) { 
+            return false, get_error_string(lexer);
+        }
+        if xml_continues_name(rune) {
+            if !advance(lexer)  return false, "unexpected EOF while parsing name";
             continue;
         }
         break;
     }
     
-    name.count = lexer.file.data - name.data;
-    return true, name;
+    return true, make_string_from_range(name_start, lexer.cursor);
 }
 
 xml_is_valid_character :: (char: u32) -> bool {
@@ -370,35 +374,6 @@ xml_is_valid_character :: (char: u32) -> bool {
         || (char >= 0x0E000 && char <= 0x00FFFD)
         || (char >= 0x10000 && char <= 0x10FFFF);
 }
-
-// is_reserved_character :: (char: u32) -> bool {
-//     return char == #char "<"
-//         || char == #char ">";
-// }
-
-// // TODO: probably just inline this in parse_tag and check for start delimiters of the various constructs in there.
-// xml_try_parse_character_data :: (lexer: *XML_Lexer) -> ok: bool, character_data: string {
-//     character_data_substring := string.{ 0, lexer.file.data };
-//     while lexer.file {
-//         if lexer.file[0] == "&" {
-//             return false, "TODO: parse character and entity references";
-//         }
-        
-//         codepoint, codepoint_length, utf8_decode_result := character_utf8_to_utf32(lexer.file.data, lexer.file.count);
-//         if utf8_decode_result != .CONVERSION_OK { 
-//             return false, "utf8 decode error while parsing XML document"; 
-//         }
-        
-//         if xml_is_valid_character(codepoint) && !is_reserved_character(codepoint) {
-//             if !advance(lexer, codepoint_length)  return false, "unexpected EOF in XML document while parsing character data";
-//             character_data_substring.count += codepoint_length;
-//             continue;
-//         }
-        
-//         return true, character_data_substring;
-//     }
-//     return true, "";
-// }
 
 xml_skip_whitespace :: inline (lexer: *XML_Lexer) -> ok: bool {
     return default_skip_whitespace(lexer, XML_WHITESPACE_CHARACTERS);

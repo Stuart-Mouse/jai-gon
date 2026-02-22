@@ -668,6 +668,9 @@ add_data_binding_to_node :: (model: *Data_Model, node: *Data_Model.Node, binding
             return false;
         }
         
+      case .ATTRIBUTE;
+        #through;
+        
       case .FIELD;
         if node.binding.type.type == {
           case .INTEGER;    // no op

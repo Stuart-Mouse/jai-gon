@@ -36,8 +36,7 @@ JSON_Lexer :: struct {
 
 init_lexer :: (lexer: *JSON_Lexer, config: JSON_Lexer_Config, file: string, file_path_for_logging := "") {
     lexer.config   = config;
-    lexer.file     = file;
-    lexer.location = .{ file_path_for_logging, 1, 1 };
+    init_scanner(lexer, file, file_path_for_logging);
     get_token(lexer);
 }
 
@@ -55,15 +54,15 @@ peek_token :: (lexer: *JSON_Lexer) -> JSON_Token {
     return lexer.next_token;
 }
 
-lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
-    if !lexer.skip_whitespace(lexer, whitespace_characters)  return .{ .ERROR, "Unexpected EOF.", lexer.location };
-    if !lexer.file  return .{ kind = .EOF };
+lex_next_token :: (lexer: *JSON_Lexer) -> JSON_Token {
+    if !lexer.skip_whitespace(lexer, lexer.whitespace_characters)  return .{ .ERROR, "Unexpected EOF.", lexer.location };
+    if is_eof(lexer)  return .{ kind = .EOF };
     
     token_location := lexer.location;
     return_error :: (message: string = "") #expand { `return .{ .ERROR, message, token_location }; }
     
     // single character tokens
-    if file[0] == {
+    if next_byte(lexer) == {
       case "|";  advance(lexer);  return .{ .VALUE_SEPARATOR, "|", token_location };
       case ":";  advance(lexer);  return .{ .COLON,           ":", token_location };
       case ",";  advance(lexer);  return .{ .COMMA,           ",", token_location };
@@ -74,9 +73,9 @@ lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
     }
     
     // identifier-like tokens 
-    if begins_with(file, "true" ) { advance(lexer, 4); return .{ .TRUE,  "true",  token_location }; }
-    if begins_with(file, "false") { advance(lexer, 5); return .{ .FALSE, "false", token_location }; }
-    if begins_with(file, "null" ) { advance(lexer, 4); return .{ .NULL,  "null",  token_location }; }
+    if begins_with(lexer, "true" ) { advance(lexer, 4); return .{ .TRUE,  "true",  token_location }; }
+    if begins_with(lexer, "false") { advance(lexer, 5); return .{ .FALSE, "false", token_location }; }
+    if begins_with(lexer, "null" ) { advance(lexer, 4); return .{ .NULL,  "null",  token_location }; }
     
     // try lexing a number
     {
@@ -93,40 +92,40 @@ lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
     }
     
     // try lexing a string
-    if file[0] == "\"" { 
-        quote_char := file[0];
+    if next_byte(lexer) == "\"" { 
+        quote_char := next_byte(lexer);
         
         if !advance(lexer)  return_error("Unexpected EOF while parsing string.");
-        start := file.data;
+        start := lexer.cursor;
         
-        while file[0] != quote_char {
-            if file[0] == "\\" {
+        while next_byte(lexer) != quote_char {
+            if next_byte(lexer) == "\\" {
                 if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
                 
-                if is_any(file[0], "\"\\/bfnrt") {
+                if is_any(next_byte(lexer), "\"\\/bfnrt") {
                     if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
-                } else if file[0] == "u" {
+                } else if next_byte(lexer) == "u" {
                     if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
                     for 0..3 {
-                        if !is_digit(file[0])  return_error("Unexpected character while parsing escape sequence.");
+                        if !is_digit(next_byte(lexer))  return_error("Unexpected character while parsing escape sequence.");
                         if !advance(lexer)     return_error("Unexpected EOF while parsing escape sequence.");
                     }
                 } else {
                     return_error("Unexpected character while parsing escape sequence.");
                 }
             } else {
-                codepoint, len, result := character_utf8_to_utf32(file.data, file.count);
-                if result != .CONVERSION_OK {
-                    return_error("utf8 decode error while parsing string.");
+                rune := next_rune(lexer);
+                if !rune && has_error(lexer) {
+                    return_error(get_error_string(lexer));
                 }
-                if codepoint < 0x20 || codepoint > 0x10FFFF {
+                if rune < 0x20 || rune > 0x10FFFF {
                     return_error("Invalid character while parsing string.");
                 }
-                if !advance(lexer, len)  return_error("Unexpected EOF while parsing string.");
+                if !advance(lexer)  return_error("Unexpected EOF while parsing string.");
             }
         }
         
-        text := string.{ file.data - start, start };
+        text := make_string_from_range(start, lexer.cursor);
         advance(lexer);
         return .{ .STRING, text, token_location };
     }
@@ -135,44 +134,44 @@ lex_next_token :: (using lexer: *JSON_Lexer) -> JSON_Token {
 }
 
 json_try_lex_number :: (using scanner: *Scanner) -> bool, string {
-    if !file  return true, "";
+    if is_eof(scanner)  return true, "";
     
-    start := file.data;
+    start := scanner.cursor;
     
-    if file[0] == "-" {
+    if next_byte(scanner) == "-" {
         if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
     }
     
-    first_digit := file[0];
+    first_digit := next_byte(scanner);
     if !is_digit(first_digit) {
-        if file.data == start  return true, "";
+        if scanner.cursor == start  return true, ""; // If we did not actually advance yet, then there is no error.
         return false, "Unexpected character while parsing number, expected a digit.";
     }
     
     if advance(scanner) {
         if first_digit != "0" {
-            while is_digit(file[0]) && advance(scanner)  {};
+            while is_digit(next_byte(scanner)) && advance(scanner)  {};
         }
         
-        if file[0] == "." {
+        if next_byte(scanner) == "." {
             if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             
-            if !is_digit(file[0])  return false, "Unexpected character while parsing number, expected a digit.";
-            while is_digit(file[0]) && advance(scanner)  {};
+            if !is_digit(next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
+            while is_digit(next_byte(scanner)) && advance(scanner)  {};
         }
         
-        if file && (file[0] == "e" || file[0] == "E") {
+        if !is_eof(scanner) && (next_byte(scanner) == "e" || next_byte(scanner) == "E") {
             if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             
-            if (file[0] == "+" || file[0] == "-") {
+            if (next_byte(scanner) == "+" || next_byte(scanner) == "-") {
                 if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             }
             
-            if !is_digit(file[0])  return false, "Unexpected character while parsing number, expected a digit.";
-            while is_digit(file[0]) && advance(scanner)  {};
+            if !is_digit(next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
+            while is_digit(next_byte(scanner)) && advance(scanner)  {};
         }
     }
     
-    return true, .{ file.data - start, start };
+    return true, make_string_from_range(start, scanner.cursor);
 }
 

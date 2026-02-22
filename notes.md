@@ -14,36 +14,65 @@ So now I think the move is to really isolate that DOM to internal data structure
 Pass some flag for implicit vs explicit root object
 
 Framework
-    [x] serialization framework
-    [x] submodule system
-        [ ] find workaround for compiler warning 
-        [x] handle single-files submodules in addition to folder-based submodules
-    [x] logging system
-        [ ] add proc to get last error message from model
-    [x] lexer utilities
+    - [X] serialization framework
+    - [X] submodule system
+        - [ ] find workaround for compiler warning 
+        - [X] handle single-files submodules in addition to folder-based submodules
+    - [X] logging system
+        - [ ] add proc to get last error message from model
+    - [X] lexer utilities
+    - [ ] create table for file extension to langauge associations
+        - [ ] association should specify language and some default config for that language
 
 JSON
-    [x] serialization
-        [ ] handle all language flags
-    [ ] test cases
-
+    - [X] serialization
+        - [ ] handle all language flags
+    - [ ] test cases
+    - [ ] default configurations
+        - [X] Standard JSON
+        - [ ] Human JSON
+        - [X] GON
+    - [ ] add optional support for `.` delim in names
+    - [ ] add optional support for value delimiter in field
 
 XML
-    [ ] parse attributes
-        [ ] add proper handling for xml node types in data model
-    [ ] parse CDATA
-    [ ] parse header stuff
-    [ ] add serialization
+    - [X] parse attributes
+    - [ ] add proper handling for xml node types in data model
+        - [X] TAG
+            - handled the same as OBJECT, with the exception that it can bind to to primitive types as well
+        - [X] ATTRIBUTE
+            - handled the same as FIELD
+        - [ ] CHARACTER_DATA 
+            - prevents child bindings
+    - [ ] parse character references
+    - [ ] parse entity references
+    - [ ] parse CDATA
+    - [ ] parse header stuff
+        - [ ] DOCTYPE
+        - [ ] ?xml tag
+    - [ ] add serialization
+    - [ ] add options for handling of character data
+        - [ ] normalize line endings
+        - [ ] process character references
+    - [ ] add functions to split xml name by namespace delimiter
+        - maybe support using this in creation of data bindings
+            - similar to using `.` delim in TOML
+    
+Scanner
+    - [ ] add support for various encodings
+        - [X] ASCII
+        - [ ] utf8
+    - [ ] support indexing and iteration by runes/codepoints rather than bytes
 
-Languages to Add:
-    XML
-    Human JSON (just add config flags for json)
-    YAML (1.2)
+Languages to Add
     TOML
+    YAML (1.2)
 
-dependencies
-    figure out what to do about set_value_from_string
-    try to clean up utils file and maybe put that stuff in a parser utils module. i dunno.
+Dependencies
+    - [ ] figure out what to do about set_value_from_string
+        - probably add a simple version of this into Reflection module, since we will probably be taking that as a dependency regardless
+    - [ ] try to clean up utils file, remove it entirely if possible
+        - Scanner should probably get its own module once we improve it to handle various text encodings
 
 
 Marshaller (for immediate-mode data processing)

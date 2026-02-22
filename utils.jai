@@ -22,47 +22,255 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
 // ========== Scanner ==========
 
 /*
-    The scanner is provided as a basic primitive for the other languages to implement a lexer on top of. 
-    Of course not all languages have to use this scanner, it's just included here so I don't have to duplicate tons of similar logic for the lexers I implement.
+    Some conventions to note:
+    
+    Procedures for skipping whitespace and comments will only return false if an unexpected EOF occurs while inside some kind of block comment.
+    This means that the caller still needs to check for EOF after skipping whitespace to see if a safe EOF occurred.
+    
+    
 */
 
 Scanner :: struct {
-    file: string;
+    /*
+        if string is not null terminated, then buffer_end points to the last character of the string + 1
+        if string is null-terminated, then buffer_end points to the null terminator
+    */
+    buffer_start, buffer_end: *u8;
+    cursor: *u8;
+    
+    // this is cached so that we don't have to decode it every time next_rune() is called.
+    next_rune:      u32;
+    
+    // meaning will depend on the text encoding
+    // for UTF8, this is a Unicode_Result
+    error_code:     u64;
+    
     using location: Source_Code_Location;
     
+    text_encoding:  Text_Encoding;
+    flags:          Flags;
+    
+    Text_Encoding :: enum {
+        ASCII;
+        // LATIN_1;
+        UTF8;
+        // UTF16;
+        // UTF32;
+    }
+    
+    Flags :: enum_flags {
+        NONE :: 0;
+        NULL_TERMINATED :: 1;
+    }
+    
     DEFAULT_WHITESPACE_CHARACTERS :: " \t\r\n";
+    
+    Marker :: struct {
+        cursor:     *u8;
+        location:   Source_Code_Location;
+    }
 }
 
-init_scanner :: (scanner: *Scanner, file: string, file_path: string) {
-    scanner.file     = file;
-    scanner.location = .{ file_path, 1, 1 };
+init_scanner :: (scanner: *Scanner, file: string, file_path_for_logging := "", text_encoding := Scanner.Text_Encoding.UTF8) {
+    scanner.buffer_start = file.data;
+    scanner.buffer_end   = file.data + file.count;
+    scanner.location     = .{ file_path_for_logging, 1, 1 };
+    
+    reset_scanner(scanner);
 }
 
-make_scanner :: (file: string, file_path: string) -> Scanner {
+reset_scanner :: (scanner: *Scanner) {
+    set_cursor(scanner, scanner.buffer_start);
+}
+
+make_scanner :: (file: string, file_path_for_logging := "", text_encoding := Scanner.Text_Encoding.UTF8) -> Scanner {
     scanner: Scanner;
-    init_scanner(scanner, file, file_path);
+    init_scanner(scanner, text_encoding, file, file_path_for_logging);
     return scanner;
 }
 
-// advances UP TO the amount specified, returns false on EOF
-advance :: (using scanner: *Scanner, amount := 1) -> bool {
-    assert(amount >= 0);
-    _amount := min(amount, file.count);
+// TODO: buffer_as_cstring, remaining_as_cstring (need to determine how to handle conditional allocation when buffer is not null terminated.)
+//       for now, user can just manually check if (flags & .NULL_TERMINATED) and use buffer_start or cursor as cstring manually.
+
+buffer_as_string :: inline (scanner: *Scanner) -> string {
+    return string.{ scanner.buffer_end - scanner.buffer_start, scanner.buffer_start };
+}
+
+remaining_as_string :: inline (scanner: *Scanner) -> string {
+    return string.{ scanner.buffer_end - scanner.cursor, scanner.cursor };
+}
+
+bytes_remaining :: inline (scanner: *Scanner) -> int {
+    return scanner.buffer_end - scanner.cursor;
+}
+
+is_eof :: inline (scanner: *Scanner) -> bool {
+    return scanner.cursor == scanner.buffer_end;
+}
+
+has_error :: inline (scanner: *Scanner) -> bool {
+    return scanner.error_code != 0;
+}
+
+get_error_string :: (scanner: *Scanner) -> string {
+    if !has_error(scanner)  return "";
     
-    // TODO: need to make sure that this check for newline is correct in utf8!
-    for 0.._amount-1 {
-        if file[it] == "\n" {
+    if #complete scanner.text_encoding == {
+      case .ASCII;
+        assert(false, "Scanner had an error code set, but text encoding is ASCII. This should not happen!");
+        
+      case .UTF8;
+        return tprint("utf8 decode error: %", scanner.error_code.(Unicode_Result));
+    }
+    
+    return "";
+}
+
+// advances UP TO the desired_amount specified, returns the length in bytes remaining
+// advance :: (using scanner: *Scanner, desired_amount := 1) -> bytes_remaining: int {
+//     assert(desired_amount >= 0);
+//     amount := min(desired_amount, bytes_remaining(scanner));
+    
+//     // TODO: need to make sure that this check for newline is correct in utf8!
+//     //       we will probably need to decode each rune as we advance
+//     for 0..amount-1 {
+//         if (cursor+it).* == "\n" {
+//             location.line_number += 1;
+//             location.character_number = 1;
+//         } else {
+//             location.character_number += 1;
+//         }
+//     }
+    
+//     set_cursor(scanner, cursor + amount);
+//     return bytes_remaining(scanner);
+// }
+
+advance :: (using scanner: *Scanner, desired_amount := 1) -> bytes_remaining: int, runes_advanced: int {
+    assert(desired_amount >= 0);
+    
+    runes_advanced := 0;
+    for 1..desired_amount {
+        if is_eof(scanner)  break;
+        
+        ok, rune, rune_length := decode_next_rune(scanner);
+        // TODO: I am not sure how to handle an error here at the moment. 
+        //       We should probably not just ignore the error though...
+        //       In the case of a utf8 decode error, we should be able to just continue, but this is still not ideal.
+        
+        if rune == #char "\n" {
             location.line_number += 1;
             location.character_number = 1;
         } else {
             location.character_number += 1;
         }
+        
+        cursor += rune_length;
+        runes_advanced += 1;
     }
     
-    file.data  += _amount;
-    file.count -= _amount;
+    decode_next_rune(scanner);
+    return bytes_remaining(scanner), runes_advanced;
+}
+
+set_cursor :: (scanner: *Scanner, cursor: *u8) {
+    assert(cursor >= scanner.buffer_start && cursor <= scanner.buffer_end);
+    scanner.cursor = cursor;
+    decode_next_rune(scanner);
+}
+
+// advance_until :: (scanner: *Scanner, $predicate: Code) -> eof: bool {
+//     while !is_eof(scanner) {
+        
+//         if !(#insert predicate) return is_eof(scanner);
+//         advance(scanner);
+//     }
+//     return true;
+// }
+
+
+// TODO: may need to specify encoding of prefix text as well so that we can convert if needed...
+begins_with :: (scanner: *Scanner, prefix: string) -> bool {
+    return begins_with(remaining_as_string(scanner), prefix);
+}
+
+// [start, end)
+make_string_from_range :: inline (start: *u8, end: *u8) -> string {
+    return string.{ max(end - start, 0), start };
+}
+
+next_byte :: inline (scanner: *Scanner) -> u8 {
+    return ifx !is_eof(scanner) then scanner.cursor.*;
+}
+
+next_rune :: inline (scanner: *Scanner) -> u32 {
+    return scanner.next_rune;
+}
+
+// This must be called any time the cursor is moved. Otherwise, callers to next_rune() will get the wrong value!
+decode_next_rune :: (scanner: *Scanner) -> bool, u32, int {
+    if has_error(scanner)  return false, 0, 0;
     
-    return file.count > 0; // return false when we hit EOF
+    source_length := 1;
+    if scanner.text_encoding == {
+      case .ASCII;
+        scanner.next_rune = scanner.cursor.*.(u32);
+        
+      case .UTF8;
+        utf8_codepoint, source_length=, utf8_decode_result := character_utf8_to_utf32(scanner.cursor, bytes_remaining(scanner));
+        scanner.next_rune  = utf8_codepoint;
+        scanner.error_code = xx utf8_decode_result;
+    }
+    
+    return !has_error(scanner), scanner.next_rune, source_length;
+}
+
+get_marker :: (scanner: Scanner) -> Scanner.Marker {
+    return .{ scanner.cursor, scanner.location };
+}
+
+// TODO: I don't like that we have to call decode_next_rune in order to include the rune pointed at by cursor, 
+//       but it's probably better to do this than to store the current rune length...
+substring_from_marker :: (scanner: *Scanner, marker: Scanner.Marker, inclusive := false) -> string, Source_Code_Range {
+    end := scanner.cursor;
+    if inclusive {
+        _, _, len := decode_next_rune(scanner);
+        end += len;
+    }
+    
+    substring := make_string_from_range(marker.cursor, scanner.cursor);
+    source_range := make_source_code_range(marker.location, scanner.location, !inclusive);
+    return substring, source_range;
+}
+
+// NOTE: there is no option to include the rune pointed to by 'end' because that would require more complication than is probably worth it.
+make_string_from_range :: (start: Scanner.Marker, end: Scanner.Marker) -> string, Source_Code_Range {
+    substring := make_string_from_range(marker.cursor, scanner.cursor);
+    source_range := make_source_code_range(marker.location, scanner.location, exclusive = true);
+    return substring, source_range;
+}
+
+
+set_position_from_marker :: (scanner: *Scanner) -> bool {
+    if marker.cursor < scanner.buffer_start || marker.cursor > scanner.buffer_end  return false;
+    set_cursor(scanner, marker.cursor);
+    scanner.location = marker.location;
+    return true;
+}
+
+// NOTE: The range is inclusive by default, because we can't know the proper end location a priori if the end character position is 1
+//       (since the previous valid character location would be at the end of the previous line, and we don't know how long that line is anymore).
+//       Maybe we could just do something hacky like say character number is S64_MAX, but then maybe that creates too much of a weird case for 
+//       For now, we just decrement the character number by one and call it a day.
+//       This means that the end character number may be zero, which is not typically valid, but at least the user can unambiguously know what this means.
+make_source_code_range :: (start: Source_Code_Location, end: Source_Code_Location, exclusive := false) -> Source_Code_Range {
+    return .{
+        fully_pathed_filename  = start.fully_pathed_filename,
+        line_number_start      = start.line_number,
+        line_number_end        = end.line_number,
+        character_number_start = start.character_number,
+        character_number_end   = end.character_number - exclusive.(int),
+    };
 }
 
 
@@ -70,35 +278,34 @@ default_begins_identifier :: (char: u8) -> bool { return is_alpha(char) || char 
 default_continues_identifier :: is_alnum;
 
 default_try_lex_identifier :: (using scanner: *Scanner) -> bool, string {
-    if default_begins_identifier(file[0]) {
-        str: string = .{ 1, *file[0] };
-        while default_continues_identifier(file[0]) && advance(scanner) {}
-        str.count = file.data - str.data;
-        return true, str;
+    if default_begins_identifier(cursor.*) {
+        start := cursor;
+        while default_continues_identifier(cursor.*) && advance(scanner) {}
+        return true, make_string_from_range(start, cursor);
     }
     return true, "";
 }
 
-default_is_legal_identifier :: (str: string) -> bool {
-    if !str return false;
-    if !default_begins_identifier(str[0])  return false;
-    for str  if !default_continues_identifier(it)  return false;
+default_is_legal_identifier :: (identifier: string) -> bool {
+    if !identifier return false;
+    if !default_begins_identifier(identifier[0])  return false;
+    for identifier  if !default_continues_identifier(it)  return false;
     return true;
 }
 
 default_skip_whitespace :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    while is_any(file[0], whitespace_characters) && advance(scanner) { }
+    while is_any(cursor.*, whitespace_characters) && advance(scanner) { }
     return true;
 }
 
 skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    if file.count == 0 return true;
+    if is_eof(scanner)  return true;
     while true {
-        while is_any(file[0], whitespace_characters) {
+        while is_any(cursor.*, whitespace_characters) {
             if !advance(scanner) return false;
         }
-        if file[0] == "#" {
-            while file[0] != "\n" {
+        if cursor.* == "#" {
+            while cursor.* != "\n" {
                 if !advance(scanner) return false;
             }
         }
@@ -108,27 +315,25 @@ skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_cha
 }
 
 skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    if file.count == 0  return true;
-    
-    while loop := file.count > 0 {
-        while is_any(file[0], whitespace_characterss) {
-            if !advance(lexer)  break;
+    while loop := !is_eof(scanner) {
+        while is_any(cursor.*, whitespace_characterss) {
+            if !advance(scanner)  break;
         }
-        if begins_with(file, "//") {
-            advance(lexer, 2);
-            while file[0] != #char "\n" {
-                if !advance(lexer)  break loop;
+        if begins_with(scanner, "//") {
+            advance(scanner, 2);
+            while cursor.* != #char "\n" {
+                if !advance(scanner)  break loop;
             }
-            advance(lexer);
+            advance(scanner);
         }
-        else if begins_with(file, "/*") {
-            advance(lexer, 2);
-            while !begins_with(file, "*/") {
-                if !advance(lexer) {
+        else if begins_with(scanner, "/*") {
+            advance(scanner, 2);
+            while !begins_with(scanner, "*/") {
+                if !advance(scanner) {
                     return false;
                 }
             }
-            advance(lexer, 2);
+            advance(scanner, 2);
         }
         else break;
     }
@@ -150,43 +355,69 @@ skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_cha
         maybe remove handling for sign, let caller handle if they wish
         probably just return empty string on error and no second bool return
             see what jai does when we have some weird thing like number ending with dot and no following digits
-        
+    
+    TODO: should probably not have separate procedures for parsing and lexing numbers.
+    We should just always parse a number and if we don't care about the actual value for some reason, then we throw it away afterwards.
 */
-default_try_lex_number :: (using scanner: *Scanner) -> string {
-    if file && (is_digit(file[0]) || (file.count > 1 && (file[0] == "+" || file[0] == "-" || file[0] == ".") && is_digit(file[1]))) {
-        text := string.{ 0, file.data };
-        
-        if file[0] == "0" && advance(scanner) {
-            if file[0] == {
-              case "b"; 
-                if advance(scanner) {
-                    while (file[0] == "0" || file[0] == "1" || file[0] == "_") && advance(scanner) {}
-                }
-                text.count = file.data - text.data;
-                return text;                
-                
-              case "h"; #through;
-              case "x"; 
-                if advance(scanner) {
-                    while (is_hex_digit(file[0]) || file[0] == "_") && advance(scanner) {}
-                }
-                text.count = file.data - text.data;
-                return text;
-            }
-        }
-        
-        while (is_digit(file[0]) || file[0] == "_") && advance(scanner) {};
-        
-        if file.count > 1 && file[0] == "." && (is_digit(file[1]) || file[1] == "_") {
-            if advance(scanner) {
-                while (is_digit(file[0]) || file[0] == "_") && advance(scanner) {};
-            }
-        }
-        
-        text.count = file.data - text.data;
-        return text;
+default_try_lex_number :: (scanner: *Scanner) -> string {
+    remaining := bytes_remaining(scanner);
+    if remaining == 0  return "";
+    
+    first_char := next_byte(scanner);
+    
+    begins_number := is_digit(first_char);
+    if !begins_number && remaining > 1 {
+        second_char := (scanner.cursor + 1).*;
+        begins_number = (first_char == "+" || first_char == "-" || first_char == ".") && is_digit(second_char);
     }
-    return "";
+    if !begins_number  return "";
+    
+    start := scanner.cursor;
+    
+    if first_char == "0" && advance(scanner) {
+        if next_byte(scanner) == {
+          case "b"; 
+            if advance(scanner) {
+                while true {
+                    char := next_byte(scanner);
+                    if !((char == "0" || char == "1" || char == "_") && advance(scanner)) break;
+                }
+            }
+            return make_string_from_range(start, scanner.cursor);
+            
+          case "h"; #through;
+          case "x"; 
+            if advance(scanner) {
+                while true {
+                    char := next_byte(scanner);
+                    if !((is_hex_digit(char) || char == "_") && advance(scanner)) break;
+                }
+            }
+            return make_string_from_range(start, scanner.cursor);
+        }
+    }
+    
+    while true {
+        char := next_byte(scanner);
+        if !((is_digit(char) || char == "_") && advance(scanner)) break;
+    }
+    
+    remaining = bytes_remaining(scanner);
+    if remaining > 1 {
+        first_char = scanner.cursor.*;
+        second_char := (scanner.cursor + 1).*;
+        
+        if first_char == "." && (is_digit(second_char) || second_char == "_") {
+            if advance(scanner) {
+                while true {
+                    char := next_byte(scanner);
+                    if !((is_digit(char) || char == "_") && advance(scanner)) break;
+                }
+            }
+        }
+    }
+    
+    return make_string_from_range(start, scanner.cursor);
 }
 
 
