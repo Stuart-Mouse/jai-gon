@@ -30,7 +30,7 @@ test_xml :: () {
             Both attributes and child tags are considered child nodes and are currently stored in the same list.
             This means that both attributes and child tags can be used to specify the values of struct members.
             Because the attributes always appear first, data bindings will attach to attributes before the child tags if some attribute and child tag have the same name.
-            Maybe this is something we will offer some more control over in the future, but for now the XML language is very incomplete in a lot of other regards, so this is not a priority.
+            Maybe this is something we will offer some more control over in the future, but for now this XML language implementation is very incomplete in a lot of other regards, so this is not a priority.
         */
         
         model: Data_Model;

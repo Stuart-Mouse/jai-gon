@@ -309,7 +309,7 @@ xml_continues_name :: (char: u32) -> bool {
 }
 
 xml_try_parse_name :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    assert(!is_eof(lexer)); // assuming this is always the case because of where we actually call this procedure
+    if is_eof(lexer)  return true, "";
     
     name_start := lexer.cursor;
     
@@ -338,7 +338,7 @@ xml_try_parse_name :: (lexer: *XML_Lexer) -> ok: bool, name: string {
 }
 
 xml_try_parse_nametoken :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    assert(!is_eof(lexer)); // assuming this is always the case because of where we actually call this procedure
+    if is_eof(lexer)  return true, "";
     
     name_start := lexer.cursor;
     

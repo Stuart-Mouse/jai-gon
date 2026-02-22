@@ -62,7 +62,9 @@ Scanner
     - [ ] add support for various encodings
         - [X] ASCII
         - [ ] utf8
-    - [ ] support indexing and iteration by runes/codepoints rather than bytes
+            - shoud be moatly done, but we need to introduce some tests
+            - [ ] index_byte and index_rune procs (indexed from cursor position)
+    - [X] support indexing and iteration by runes/codepoints rather than bytes
 
 Languages to Add
     TOML
