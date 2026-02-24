@@ -44,8 +44,9 @@ XML
             - handled the same as FIELD
         - [ ] CHARACTER_DATA 
             - prevents child bindings
-    - [ ] parse character references
-    - [ ] parse entity references
+    - [X] parse character references
+    - [X] parse entity references
+    - [ ] attribute value normalization
     - [ ] parse CDATA
     - [ ] parse header stuff
         - [ ] DOCTYPE
@@ -57,7 +58,7 @@ XML
     - [ ] add functions to split xml name by namespace delimiter
         - maybe support using this in creation of data bindings
             - similar to using `.` delim in TOML
-    
+
 Scanner
     - [ ] add support for various encodings
         - [X] ASCII
