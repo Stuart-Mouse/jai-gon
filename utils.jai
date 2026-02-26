@@ -694,18 +694,24 @@ string_to_u64 :: (text: string, base: u64 = 10) -> result: u64, success: bool, r
     TODO: support octal numbers
     TODO: support hexadecimal floats
 */
-parse_number :: (s: string) -> result: Any_Number, success: bool, remainder: string {    
+
+parse_any_number :: (s: string) -> success: bool, number: Any_Number, remainder: string {    
+    ok, result_bytes, result_type, remainder := parse_number(s);
+    return ok, .{ as_u64 = result_bytes, type = result_type }, remainder;
+}
+
+parse_number :: (s: string) -> success: bool, result_bytes: u64, result_type: *Type_Info, remainder: string {    
     if !s {
         log("Error: empty string in parse_number!");
-        return .{}, false, "";
+        return false, 0, null, remainder;
     }
     
     // if we've got a decimal point in there, we will prefer float64
     // else we parse and store it as an integer below
     if contains(s, ".") {
-        val, ok, remainder := string_to_float64(s);
+        float64_value, ok, remainder := string_to_float64(s);
         if !ok  log("Error: failed to parse float from '%'.", s);
-        return Any_Number.from(val), ok, remainder;
+        return ok, (*float64_value).(*u64).*, type_info(float64), remainder;
     }
     
     str := s;
@@ -735,24 +741,23 @@ parse_number :: (s: string) -> result: Any_Number, success: bool, remainder: str
         }
     }
     
-    u64_value, ok, remainder := string_to_u64(str, base);
+    ok, u64_value, remainder := string_to_u64(str, base);
     if !ok {
         log("Error: failed to parse integer from '%'.", s);
-        return .{}, false, remainder;
+        return false, 0, null, remainder;
     }
     
     if negate {
         if u64_value > S64_MAX.(u64) + 1 {
             log("Error: cannot negate parsed u64 value, as it would be out of range for s64.");
-            return .{}, false, remainder;
+            return false, 0, null, remainder;
         }
         s64_value := -(u64_value-1).(s64) - 1;
-        return Any_Number.from(s64_value), true, remainder;
+        return true, (*s64_value).(*u64).*, type_info(s64), remainder;
     } else {
         // use s64 unless u64 value would be out of range
-        ret := Any_Number.from(u64_value);
-        if u64_value <= S64_MAX.(u64) then ret.__type = s64;
-        return ret, true, remainder;
+        type := ifx u64_value <= S64_MAX.(u64) then type_info(s64) else type_info(u64);
+        return true, ret, type, remainder;
     }
 }
 

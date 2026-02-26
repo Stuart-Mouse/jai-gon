@@ -115,10 +115,9 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
         
         tag_value_begin := lexer.cursor;
         
-        
         character_data_start := get_marker(lexer);
         
-        while true {
+        while parse_contents := true {
             if next_byte(*lexer) == "<" {
                 // commit pending character data section
                 character_data_substring := substring_from_marker(*lexer, character_data_start);
@@ -167,7 +166,7 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
             
             ok, parsed_reference := xml_try_parse_reference(model);
             if !ok  return false;
-            if parsed_reference  continue;
+            if parsed_reference  continue parse_contents;
             
             rune := next_rune(*lexer);
             if !rune && has_error(*lexer) { 
@@ -233,6 +232,7 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
             report_error(model, lexer.location, get_error_string(*lexer));
             return false;
         }
+        // TODO: should disallow `<` in string according to xml specification
         if !xml_is_valid_character(rune) {
             report_error(model, lexer.location, "invalid character encountered");
             return false;
