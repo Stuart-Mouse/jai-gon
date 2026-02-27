@@ -21,7 +21,7 @@ test_xml :: () {
             <my_int value="5"/>
             <foo my_float="3.5">
                 <my_float>7</my_float>
-                <my_string>this is a string</my_string>
+                <my_string>this is a string <![CDATA[<greeting>Hello, world!</greeting>]]> </my_string>
             </foo>
         </root>
         END

@@ -33,9 +33,15 @@ XML_Config :: struct {
     indentation_string := "    ";
 }
 
-#scope_module
+#scope_file
 
 XML_LANGUAGE_ID :: "XML";
+
+XML_Parse_Result :: enum {
+    ERROR       :: -1;
+    NOT_PARSED  ::  0;
+    PARSED      ::  1;
+}
 
 xml_deinit_language :: (model: *Data_Model) {
     ctx := model.language.language_context.(*XML_Context);
@@ -68,9 +74,10 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
             return false;
         }
         
-        ok, tag_name := xml_try_parse_name(*lexer);
-        if !ok || !tag_name {
-            report_error(model, tag_location, "expected a name");
+        result, tag_name := xml_try_parse_name(*lexer);
+        if result != .PARSED {
+            error_message := ifx result == .ERROR then tag_name else "expected a name after `<` in start tag";
+            report_error(model, tag_location, error_message);
             return false;
         }
         
@@ -115,10 +122,20 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
         
         tag_value_begin := lexer.cursor;
         
-        character_data_start := get_marker(lexer);
+        character_data_start: Scanner.Marker;
         
         while parse_contents := true {
+            // begin a new character data substring if we are not currently constructing one
+            if character_data_start.cursor == null {
+                character_data_start = get_marker(lexer);
+            }
             if next_byte(*lexer) == "<" {
+                result := xml_try_parse_cdata(model);
+                if result == {
+                  case .ERROR;   return false;
+                  case .PARSED;  continue parse_contents;
+                }
+                
                 // commit pending character data section
                 character_data_substring := substring_from_marker(*lexer, character_data_start);
                 character_data_substring = trim(character_data_substring, XML_WHITESPACE_CHARACTERS); // TODO: maybe use a flag to not do this!
@@ -158,28 +175,17 @@ xml_try_parse_tag :: (model: *Data_Model, parent_tag: *Data_Model.Node) -> bool 
                 
                 if !xml_try_parse_tag(model, tag_node)  return false;
             }
-            
-            // begin a new character data substring if we are not currently constructing one
-            if character_data_start.cursor == null {
-                character_data_start = get_marker(lexer);
-            }
-            
-            ok, parsed_reference := xml_try_parse_reference(model);
-            if !ok  return false;
-            if parsed_reference  continue parse_contents;
-            
-            rune := next_rune(*lexer);
-            if !rune && has_error(*lexer) { 
-                report_error(model, lexer.location, get_error_string(*lexer));
-                return false;
-            }
-            if !xml_is_valid_character(rune) {
-                report_error(model, lexer.location, "invalid character encountered");
-                return false;
-            }
-            if !advance(*lexer) {
-                report_error(model, lexer.location, "unexpected EOF in XML document while parsing character data");
-                return false;
+            while next_byte(*lexer) != "<" {
+                result := xml_try_parse_reference(model);
+                if result == {
+                  case .ERROR;   return false;
+                  case .PARSED;  continue parse_contents;
+                }
+                ok, error_message := xml_consume_rune_and_advance(*lexer);
+                if !ok {
+                    report_error(model, lexer.location, error_message);
+                    return false;
+                }
             }
         }
     }
@@ -193,8 +199,10 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
     
     attribute_location := lexer.location;
     
-    ok, attribute_name := xml_try_parse_name(*lexer);
-    if !ok || !attribute_name {
+    result, attribute_name := xml_try_parse_name(*lexer);
+    if result != .PARSED {
+        // TODO: better error message, may have to pass back error to caller with some context
+        error_message := ifx result == .ERROR then attribute_name else "expected an attribute name";
         report_error(model, attribute_location, "expected an attribute name");
         return false;
     }
@@ -223,22 +231,15 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
     
     attribute_value_start := lexer.cursor;
     while next_byte(*lexer) != quote_character {
-        ok, parsed_reference := xml_try_parse_reference(model);
-        if !ok  return false;
-        if parsed_reference  continue;
+        result := xml_try_parse_reference(model);
+        if result == {
+          case .ERROR;   return false;
+          case .PARSED;  continue;
+        }
         
-        rune := next_rune(*lexer);
-        if !rune && has_error(*lexer) { 
-            report_error(model, lexer.location, get_error_string(*lexer));
-            return false;
-        }
-        // TODO: should disallow `<` in string according to xml specification
-        if !xml_is_valid_character(rune) {
-            report_error(model, lexer.location, "invalid character encountered");
-            return false;
-        }
-        if !advance(*lexer) {
-            report_error(model, lexer.location, "unexpected EOF in XML document while parsing attribute value");
+        ok, error_message := xml_consume_rune_and_advance(*lexer);
+        if !ok {
+            report_error(model, lexer.location, error_message);
             return false;
         }
     }
@@ -263,7 +264,7 @@ xml_try_parse_attribute :: (model: *Data_Model, parent_tag: *Data_Model.Node) ->
 }
 
 // return normalized value if it is possible to parse XML in single pass
-xml_try_parse_reference :: (model: *Data_Model) -> ok: bool, was_parsed: bool {
+xml_try_parse_reference :: (model: *Data_Model) -> XML_Parse_Result {
     using xml_context := model.language.language_context.(*XML_Context);
     
     reference_location := lexer.location;
@@ -272,55 +273,56 @@ xml_try_parse_reference :: (model: *Data_Model) -> ok: bool, was_parsed: bool {
     if begins_with(*lexer, "&#") {
         if !advance(*lexer, 2) {
             report_error(model, reference_location, "unexpected EOF in XML document while while parsing reference");
-            return false, false;
+            return .ERROR;
         }
         if !advance(*lexer) {
             report_error(model, reference_location, "unexpected EOF in XML document while while parsing character reference");
-            return false, false;
+            return .ERROR;
         }
         if next_byte(*lexer) == "x" {
             if !advance(*lexer) {
                 report_error(model, reference_location, "unexpected EOF in XML document while while parsing character reference");
-                return false, false;
+                return .ERROR;
             }
         }
         while next_byte(*lexer) != ";" {
             if !is_digit(next_byte(*lexer)) {
                 report_error(model, reference_location, "unexpected character encountered in XML document while while parsing character reference");
-                return false, false;
+                return .ERROR;
             }
             if !advance(*lexer) {
                 report_error(model, reference_location, "unexpected EOF in XML document while while parsing character reference");
-                return false, false;
+                return .ERROR;
             }
         }
         advance(*lexer);
-        return true, true;
+        return .PARSED;
     }
     
-    // (parameter) entity reference
+    // entity reference
     if next_byte(*lexer) == "&" || next_byte(*lexer) == "%" {
         if !advance(*lexer) {
-            report_error(model, reference_location, "unexpected EOF in XML document while while parsing character reference");
-            return false, false;
+            report_error(model, reference_location, "unexpected EOF in XML document while while parsing entity reference");
+            return .ERROR;
         }
-        ok, name := xml_try_parse_name(*lexer);
-        if !ok {
-            report_error(model, reference_location, name);
-            return false, false;
-        }
-        if !name {
+        result, name_or_error := xml_try_parse_name(*lexer);
+        if result == {
+          case .ERROR;
+            report_error(model, reference_location, name_or_error);
+            return .ERROR;
+            
+          case .NOT_PARSED;
             report_error(model, reference_location, "unable to parse reference");
-            return false, false;
+            return .ERROR;
         }
         if next_byte(*lexer) != ";" {
-            report_error(model, reference_location, "expected a semicolon to terminate reference");
-            return false, false;
+            report_error(model, reference_location, "expected a semicolon to terminate entity reference");
+            return .ERROR;
         }
-        return true, true;
+        return .PARSED;
     }
     
-    return true, false;
+    return .NOT_PARSED;
 }
 
 /*
@@ -370,62 +372,58 @@ xml_continues_name :: (char: u32) -> bool {
         || (char >= 0x203F && char <= 0x2040);
 }
 
-xml_try_parse_name :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    if is_eof(lexer)  return true, "";
-    
+xml_try_parse_name :: (lexer: *XML_Lexer) -> result: XML_Parse_Result, name_or_error_message: string {    
     name_start := lexer.cursor;
     
     rune := next_rune(lexer);
     if !rune && has_error(lexer) { 
-        return false, get_error_string(lexer);
+        return .ERROR, get_error_string(lexer);
     }
     
-    if !xml_starts_name(rune)  return true, "";
+    if !xml_starts_name(rune)  return .NOT_PARSED, "";
     
-    if !advance(lexer)  return false, "unexpected EOF while parsing name";
+    if !advance(lexer)  return .ERROR, "unexpected EOF while parsing name";
     
     while true {
         rune := next_rune(lexer);
         if !rune && has_error(lexer) { 
-            return false, get_error_string(lexer);
+            return .ERROR, get_error_string(lexer);
         }
         if xml_continues_name(rune) {
-            if !advance(lexer)  return false, "unexpected EOF while parsing name";
+            if !advance(lexer)  return .ERROR, "unexpected EOF while parsing name";
             continue;
         }
         break;
     }
     
-    return true, make_string_from_range(name_start, lexer.cursor);
+    return .PARSED, make_string_from_range(name_start, lexer.cursor);
 }
 
-xml_try_parse_nametoken :: (lexer: *XML_Lexer) -> ok: bool, name: string {    
-    if is_eof(lexer)  return true, "";
-    
+xml_try_parse_nametoken :: (lexer: *XML_Lexer) -> result: XML_Parse_Result, name_or_error_message: string {    
     name_start := lexer.cursor;
     
     rune := next_rune(lexer);
     if !rune && has_error(lexer) { 
-        return false, get_error_string(lexer);
+        return .ERROR, get_error_string(lexer);
     }
     
-    if !xml_continues_name(rune)  return true, "";
+    if !xml_continues_name(rune)  return .NOT_PARSED, "";
     
-    if !advance(lexer)  return false, "unexpected EOF while parsing name";
+    if !advance(lexer)  return .ERROR, "unexpected EOF while parsing name";
     
     while true {
         rune := next_rune(lexer);
         if !rune && has_error(lexer) { 
-            return false, get_error_string(lexer);
+            return .ERROR, get_error_string(lexer);
         }
         if xml_continues_name(rune) {
-            if !advance(lexer)  return false, "unexpected EOF while parsing name";
+            if !advance(lexer)  return .ERROR, "unexpected EOF while parsing name";
             continue;
         }
         break;
     }
     
-    return true, make_string_from_range(name_start, lexer.cursor);
+    return .PARSED, make_string_from_range(name_start, lexer.cursor);
 }
 
 xml_is_valid_character :: (char: u32) -> bool {
@@ -440,4 +438,45 @@ xml_is_valid_character :: (char: u32) -> bool {
 xml_skip_whitespace :: inline (lexer: *XML_Lexer) -> ok: bool {
     return default_skip_whitespace(lexer, XML_WHITESPACE_CHARACTERS);
 }
+
+xml_try_parse_cdata :: (model: *Data_Model) -> XML_Parse_Result {
+    using xml_context := model.language.language_context.(*XML_Context);
+    
+    CDATA_SECTION_START :: "<![CDATA[";
+    CDATA_SECTION_END :: "]]>";
+    
+    if begins_with(*lexer, CDATA_SECTION_START) {
+        if !advance(*lexer) {
+            report_error(model, lexer.location, "unexpected EOF in XML document while while parsing cdata section");
+            return .ERROR;
+        }
+        while !begins_with(*lexer, CDATA_SECTION_END) {
+            ok, error_message := xml_consume_rune_and_advance(*lexer);
+            if !ok {
+                report_error(model, lexer.location, error_message);
+                return .ERROR;
+            }
+        }
+        advance(*lexer, CDATA_SECTION_END.count);
+        return .PARSED;
+    }
+    
+    return .NOT_PARSED;
+}
+
+xml_consume_rune_and_advance :: (lexer: *XML_Lexer) -> ok: bool, error_message: string {
+    rune := next_rune(lexer);
+    if !rune && has_error(lexer) {
+        return false, get_error_string(lexer);
+    }
+    if !xml_is_valid_character(rune) {
+        return false, "invalid character encountered in XML document";
+    }
+    if !advance(lexer) {
+        return false, "unexpected EOF in XML document";
+    }
+    return true, "";
+}
+
+
 

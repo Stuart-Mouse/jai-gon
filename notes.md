@@ -47,11 +47,13 @@ XML
     - [X] parse character references
     - [X] parse entity references
     - [ ] attribute value normalization
-    - [ ] parse CDATA
-    - [ ] parse header stuff
+    - [X] parse CDATA
+    - [ ] parse prolog
+        - [ ] parse processing instructiosn
+        - [ ] xml declaration
         - [ ] DOCTYPE
-        - [ ] ?xml tag
     - [ ] add serialization
+        - how to serialize json node types into xml output?
     - [ ] add options for handling of character data
         - [ ] normalize line endings
         - [ ] process character references
@@ -62,9 +64,8 @@ XML
 Scanner
     - [ ] add support for various encodings
         - [X] ASCII
-        - [ ] utf8
-            - shoud be mostly done, but we need to introduce some tests
-            - [ ] index_byte and index_rune procs (indexed from cursor position)
+        - [X] utf8
+            - [ ] write some basic tests
     - [X] support indexing and iteration by runes/codepoints rather than bytes
 
 Languages to Add
