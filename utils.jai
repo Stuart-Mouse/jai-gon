@@ -299,34 +299,36 @@ default_skip_whitespace :: (using scanner: *Scanner, whitespace_characters := Sc
 }
 
 skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
-    if is_eof(scanner)  return true;
-    while true {
-        while is_any(cursor.*, whitespace_characters) {
-            if !advance(scanner) return false;
+    while loop := !is_eof(scanner) {
+        while is_any(next_byte(scanner), whitespace_characters) {
+            if !advance(scanner)  break loop;
         }
-        if cursor.* == "#" {
-            while cursor.* != "\n" {
+        if next_byte(scanner) == "#" {
+            while next_byte(scanner) != "\n" {
                 if !advance(scanner) return false;
             }
+            advance(scanner);
+            continue;
         }
-        else return true;
+        break loop;
     }
     return true;
 }
 
 skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
     while loop := !is_eof(scanner) {
-        while is_any(cursor.*, whitespace_characterss) {
-            if !advance(scanner)  break;
+        while is_any(next_byte(scanner), whitespace_characterss) {
+            if !advance(scanner)  break loop;
         }
         if begins_with(scanner, "//") {
             advance(scanner, 2);
-            while cursor.* != #char "\n" {
+            while next_byte(scanner) != #char "\n" {
                 if !advance(scanner)  break loop;
             }
             advance(scanner);
+            continue;
         }
-        else if begins_with(scanner, "/*") {
+        if begins_with(scanner, "/*") {
             advance(scanner, 2);
             while !begins_with(scanner, "*/") {
                 if !advance(scanner) {
@@ -334,8 +336,9 @@ skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_cha
                 }
             }
             advance(scanner, 2);
+            continue;
         }
-        else break;
+        break loop;
     }
     return true;
 }
