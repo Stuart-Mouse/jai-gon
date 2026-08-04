@@ -26,19 +26,17 @@ all_bytes_are_zero :: (data: *void, count: int) -> bool {
     
     Procedures for skipping whitespace and comments will only return false if an unexpected EOF occurs while inside some kind of block comment.
     This means that the caller still needs to check for EOF after skipping whitespace to see if a safe EOF occurred.
-    
-    
 */
 
 Scanner :: struct {
     /*
-        if string is not null terminated, then buffer_end points to the last character of the string + 1
-        if string is null-terminated, then buffer_end points to the null terminator
+        if buffer is not null terminated, then buffer_end points to the last valid character of the buffer + 1
+        if buffer is null-terminated, then buffer_end points to the null terminator
     */
     buffer_start, buffer_end: *u8;
     cursor: *u8;
     
-    // this is cached so that we don't have to decode it every time next_rune() is called.
+    // this is cached so that we don't have to decode it every time get_next_rune() is called.
     next_rune:      u32;
     
     // meaning will depend on the text encoding
@@ -89,8 +87,15 @@ make_scanner :: (file: string, file_path_for_logging := "", text_encoding := Sca
     return scanner;
 }
 
-// TODO: buffer_as_cstring, remaining_as_cstring (need to determine how to handle conditional allocation when buffer is not null terminated.)
-//       for now, user can just manually check if (flags & .NULL_TERMINATED) and use buffer_start or cursor as cstring manually.
+buffer_as_cstring :: inline (scanner: *Scanner) -> *u8 {
+    assert(scanner.flags & .NULL_TERMINATED);
+    return scanner.buffer_start;
+}
+
+remaining_as_cstring :: inline (scanner: *Scanner) -> *u8 {
+    assert(scanner.flags & .NULL_TERMINATED);
+    return scanner.cursor;
+}
 
 buffer_as_string :: inline (scanner: *Scanner) -> string {
     return string.{ scanner.buffer_end - scanner.buffer_start, scanner.buffer_start };
@@ -100,7 +105,7 @@ remaining_as_string :: inline (scanner: *Scanner) -> string {
     return string.{ scanner.buffer_end - scanner.cursor, scanner.cursor };
 }
 
-bytes_remaining :: inline (scanner: *Scanner) -> int {
+get_bytes_remaining :: inline (scanner: *Scanner) -> int {
     return scanner.buffer_end - scanner.cursor;
 }
 
@@ -129,7 +134,7 @@ get_error_string :: (scanner: *Scanner) -> string {
 // advances UP TO the desired_amount specified, returns the length in bytes remaining
 // advance :: (using scanner: *Scanner, desired_amount := 1) -> bytes_remaining: int {
 //     assert(desired_amount >= 0);
-//     amount := min(desired_amount, bytes_remaining(scanner));
+//     amount := min(desired_amount, get_bytes_remaining(scanner));
     
 //     // TODO: need to make sure that this check for newline is correct in utf8!
 //     //       we will probably need to decode each rune as we advance
@@ -143,7 +148,7 @@ get_error_string :: (scanner: *Scanner) -> string {
 //     }
     
 //     set_cursor(scanner, cursor + amount);
-//     return bytes_remaining(scanner);
+//     return get_bytes_remaining(scanner);
 // }
 
 advance :: (using scanner: *Scanner, desired_amount := 1) -> bytes_remaining: int, runes_advanced: int {
@@ -170,7 +175,7 @@ advance :: (using scanner: *Scanner, desired_amount := 1) -> bytes_remaining: in
     }
     
     decode_next_rune(scanner);
-    return bytes_remaining(scanner), runes_advanced;
+    return get_bytes_remaining(scanner), runes_advanced;
 }
 
 set_cursor :: (scanner: *Scanner, cursor: *u8) {
@@ -199,15 +204,15 @@ make_string_from_range :: inline (start: *u8, end: *u8) -> string {
     return string.{ max(end - start, 0), start };
 }
 
-next_byte :: inline (scanner: *Scanner) -> u8 {
+get_next_byte :: inline (scanner: *Scanner) -> u8 {
     return ifx !is_eof(scanner) then scanner.cursor.*;
 }
 
-next_rune :: inline (scanner: *Scanner) -> u32 {
+get_next_rune :: inline (scanner: *Scanner) -> u32 {
     return scanner.next_rune;
 }
 
-// This must be called any time the cursor is moved. Otherwise, callers to next_rune() will get the wrong value!
+// This must be called any time the cursor is moved. Otherwise, callers to get_next_rune() will get the wrong value!
 decode_next_rune :: (scanner: *Scanner) -> bool, u32, int {
     if has_error(scanner)  return false, 0, 0;
     
@@ -217,7 +222,7 @@ decode_next_rune :: (scanner: *Scanner) -> bool, u32, int {
         scanner.next_rune = scanner.cursor.*.(u32);
         
       case .UTF8;
-        utf8_codepoint, source_length=, utf8_decode_result := character_utf8_to_utf32(scanner.cursor, bytes_remaining(scanner));
+        utf8_codepoint, source_length=, utf8_decode_result := character_utf8_to_utf32(scanner.cursor, get_bytes_remaining(scanner));
         scanner.next_rune  = utf8_codepoint;
         scanner.error_code = xx utf8_decode_result;
     }
@@ -245,13 +250,13 @@ substring_from_marker :: (scanner: *Scanner, marker: Scanner.Marker, inclusive :
 
 // NOTE: there is no option to include the rune pointed to by 'end' because that would require more complication than is probably worth it.
 make_string_from_range :: (start: Scanner.Marker, end: Scanner.Marker) -> string, Source_Code_Range {
-    substring := make_string_from_range(marker.cursor, scanner.cursor);
-    source_range := make_source_code_range(marker.location, scanner.location, exclusive = true);
+    substring := make_string_from_range(start.cursor, end.cursor);
+    source_range := make_source_code_range(start.location, end.location, exclusive = true);
     return substring, source_range;
 }
 
 
-set_position_from_marker :: (scanner: *Scanner) -> bool {
+set_position_from_marker :: (scanner: *Scanner, marker: Scanner.Marker) -> bool {
     if marker.cursor < scanner.buffer_start || marker.cursor > scanner.buffer_end  return false;
     set_cursor(scanner, marker.cursor);
     scanner.location = marker.location;
@@ -300,11 +305,11 @@ default_skip_whitespace :: (using scanner: *Scanner, whitespace_characters := Sc
 
 skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
     while loop := !is_eof(scanner) {
-        while is_any(next_byte(scanner), whitespace_characters) {
+        while is_any(get_next_byte(scanner), whitespace_characters) {
             if !advance(scanner)  break loop;
         }
-        if next_byte(scanner) == "#" {
-            while next_byte(scanner) != "\n" {
+        if get_next_byte(scanner) == "#" {
+            while get_next_byte(scanner) != "\n" {
                 if !advance(scanner) return false;
             }
             advance(scanner);
@@ -317,12 +322,12 @@ skip_whitespace_and_hashtag_comments :: (using scanner: *Scanner, whitespace_cha
 
 skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_characters := Scanner.DEFAULT_WHITESPACE_CHARACTERS) -> bool {
     while loop := !is_eof(scanner) {
-        while is_any(next_byte(scanner), whitespace_characterss) {
+        while is_any(get_next_byte(scanner), whitespace_characterss) {
             if !advance(scanner)  break loop;
         }
         if begins_with(scanner, "//") {
             advance(scanner, 2);
-            while next_byte(scanner) != #char "\n" {
+            while get_next_byte(scanner) != #char "\n" {
                 if !advance(scanner)  break loop;
             }
             advance(scanner);
@@ -363,10 +368,10 @@ skip_whitespace_and_c_style_comments :: (using scanner: *Scanner, whitespace_cha
     We should just always parse a number and if we don't care about the actual value for some reason, then we throw it away afterwards.
 */
 default_try_lex_number :: (scanner: *Scanner) -> string {
-    remaining := bytes_remaining(scanner);
+    remaining := get_bytes_remaining(scanner);
     if remaining == 0  return "";
     
-    first_char := next_byte(scanner);
+    first_char := get_next_byte(scanner);
     
     begins_number := is_digit(first_char);
     if !begins_number && remaining > 1 {
@@ -378,11 +383,11 @@ default_try_lex_number :: (scanner: *Scanner) -> string {
     start := scanner.cursor;
     
     if first_char == "0" && advance(scanner) {
-        if next_byte(scanner) == {
+        if get_next_byte(scanner) == {
           case "b"; 
             if advance(scanner) {
                 while true {
-                    char := next_byte(scanner);
+                    char := get_next_byte(scanner);
                     if !((char == "0" || char == "1" || char == "_") && advance(scanner)) break;
                 }
             }
@@ -392,7 +397,7 @@ default_try_lex_number :: (scanner: *Scanner) -> string {
           case "x"; 
             if advance(scanner) {
                 while true {
-                    char := next_byte(scanner);
+                    char := get_next_byte(scanner);
                     if !((is_hex_digit(char) || char == "_") && advance(scanner)) break;
                 }
             }
@@ -401,11 +406,11 @@ default_try_lex_number :: (scanner: *Scanner) -> string {
     }
     
     while true {
-        char := next_byte(scanner);
+        char := get_next_byte(scanner);
         if !((is_digit(char) || char == "_") && advance(scanner)) break;
     }
     
-    remaining = bytes_remaining(scanner);
+    remaining = get_bytes_remaining(scanner);
     if remaining > 1 {
         first_char = scanner.cursor.*;
         second_char := (scanner.cursor + 1).*;
@@ -413,7 +418,7 @@ default_try_lex_number :: (scanner: *Scanner) -> string {
         if first_char == "." && (is_digit(second_char) || second_char == "_") {
             if advance(scanner) {
                 while true {
-                    char := next_byte(scanner);
+                    char := get_next_byte(scanner);
                     if !((is_digit(char) || char == "_") && advance(scanner)) break;
                 }
             }

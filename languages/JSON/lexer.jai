@@ -62,7 +62,7 @@ lex_next_token :: (lexer: *JSON_Lexer) -> JSON_Token {
     return_error :: (message: string = "") #expand { `return .{ .ERROR, message, token_location }; }
     
     // single character tokens
-    if next_byte(lexer) == {
+    if get_next_byte(lexer) == {
       case "|";  advance(lexer);  return .{ .VALUE_SEPARATOR, "|", token_location };
       case ":";  advance(lexer);  return .{ .COLON,           ":", token_location };
       case ",";  advance(lexer);  return .{ .COMMA,           ",", token_location };
@@ -92,29 +92,29 @@ lex_next_token :: (lexer: *JSON_Lexer) -> JSON_Token {
     }
     
     // try lexing a string
-    if next_byte(lexer) == "\"" { 
-        quote_char := next_byte(lexer);
+    if get_next_byte(lexer) == "\"" { 
+        quote_char := get_next_byte(lexer);
         
         if !advance(lexer)  return_error("Unexpected EOF while parsing string.");
         start := lexer.cursor;
         
-        while next_byte(lexer) != quote_char {
-            if next_byte(lexer) == "\\" {
+        while get_next_byte(lexer) != quote_char {
+            if get_next_byte(lexer) == "\\" {
                 if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
                 
-                if is_any(next_byte(lexer), "\"\\/bfnrt") {
+                if is_any(get_next_byte(lexer), "\"\\/bfnrt") {
                     if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
-                } else if next_byte(lexer) == "u" {
+                } else if get_next_byte(lexer) == "u" {
                     if !advance(lexer)  return_error("Unexpected EOF while parsing escape sequence.");
                     for 0..3 {
-                        if !is_digit(next_byte(lexer))  return_error("Unexpected character while parsing escape sequence.");
+                        if !is_digit(get_next_byte(lexer))  return_error("Unexpected character while parsing escape sequence.");
                         if !advance(lexer)     return_error("Unexpected EOF while parsing escape sequence.");
                     }
                 } else {
                     return_error("Unexpected character while parsing escape sequence.");
                 }
             } else {
-                rune := next_rune(lexer);
+                rune := get_next_rune(lexer);
                 if !rune && has_error(lexer) {
                     return_error(get_error_string(lexer));
                 }
@@ -138,11 +138,11 @@ json_try_lex_number :: (using scanner: *Scanner) -> bool, string {
     
     start := scanner.cursor;
     
-    if next_byte(scanner) == "-" {
+    if get_next_byte(scanner) == "-" {
         if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
     }
     
-    first_digit := next_byte(scanner);
+    first_digit := get_next_byte(scanner);
     if !is_digit(first_digit) {
         if scanner.cursor == start  return true, ""; // If we did not actually advance yet, then there is no error.
         return false, "Unexpected character while parsing number, expected a digit.";
@@ -150,25 +150,25 @@ json_try_lex_number :: (using scanner: *Scanner) -> bool, string {
     
     if advance(scanner) {
         if first_digit != "0" {
-            while is_digit(next_byte(scanner)) && advance(scanner)  {};
+            while is_digit(get_next_byte(scanner)) && advance(scanner)  {};
         }
         
-        if next_byte(scanner) == "." {
+        if get_next_byte(scanner) == "." {
             if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             
-            if !is_digit(next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
-            while is_digit(next_byte(scanner)) && advance(scanner)  {};
+            if !is_digit(get_next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
+            while is_digit(get_next_byte(scanner)) && advance(scanner)  {};
         }
         
-        if !is_eof(scanner) && (next_byte(scanner) == "e" || next_byte(scanner) == "E") {
+        if !is_eof(scanner) && (get_next_byte(scanner) == "e" || get_next_byte(scanner) == "E") {
             if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             
-            if (next_byte(scanner) == "+" || next_byte(scanner) == "-") {
+            if (get_next_byte(scanner) == "+" || get_next_byte(scanner) == "-") {
                 if !advance(scanner)  return false, "Unexpected EOF while parsing number.";
             }
             
-            if !is_digit(next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
-            while is_digit(next_byte(scanner)) && advance(scanner)  {};
+            if !is_digit(get_next_byte(scanner))  return false, "Unexpected character while parsing number, expected a digit.";
+            while is_digit(get_next_byte(scanner)) && advance(scanner)  {};
         }
     }
     
