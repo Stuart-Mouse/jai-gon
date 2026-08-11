@@ -633,40 +633,42 @@ string_to_u64 :: (text: string, base: u64 = 10) -> result: u64, success: bool, r
     assert(base == 16 || base <= 10);
     if !text  return 0, false, "";
     
-    s := text;
+    _text := text;
     sum: u64 = 0;
     cursor := 0;
     
+    parsed_digit := false;
+    
+    // TODO: We should probably handle other higher bases, such as base32 and base64. Could maybe refer to Odin's implementation for ideas.
     if base == 16 {
-        while cursor < s.count {
+        while cursor < _text.count {
             defer cursor += 1;
-            c := s[cursor];
-            if c == "_"  continue;
-
+            c := _text[cursor];
+            
+            if parsed_digit && c == "_"  continue;
+            
             digit: u8 = ---;
-            if is_digit(c) {
-                digit = c - "0";
-            } else if (c >= "a") && (c <= "f") {
-                digit = c - "a" + 10;
-            } else if (c >= "A") && (c <= "F") {
-                digit = c - "A" + 10;
-            } else {
-                break;
-            }
+            if      is_digit(c)              then digit = c - "0";
+            else if (c >= "a") && (c <= "f") then digit = c - "a" + 10;
+            else if (c >= "A") && (c <= "F") then digit = c - "A" + 10;
+            else                                  break;
+            parsed_digit = true;
             
             sum *= base;
             sum += digit.(u64);
         }
     } else {
-        while cursor < s.count {
+        while cursor < _text.count {
             defer cursor += 1;
-            c := s[cursor];
-            if c == "_"  continue;
-
+            c := _text[cursor];
+            
+            if parsed_digit && c == "_"  continue;
+            
             if !is_digit(c) break;
             
             digit := c - "0";
             if digit >= base break;
+            parsed_digit = true;
             
             prev := sum;
             
@@ -682,10 +684,9 @@ string_to_u64 :: (text: string, base: u64 = 10) -> result: u64, success: bool, r
         }
     }
     
-    success := (cursor != 0);
-    advance(*s, cursor);
-    
-    return sum, success, s;
+    success := parsed_digit;
+    if success then advance(*_text, cursor);
+    return sum, success, _text;
 }
 
 
